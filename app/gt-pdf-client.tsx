@@ -132,9 +132,9 @@ export default function GTPdfClient() {
     const lifecycle = new AbortController();
     try {
       void Promise.resolve(modelContext.registerTool({
-        name: "choose_gt_pdf_tool",
-        title: "Choose a GT PDF tool",
-        description: "Open one of GT PDF's visible local document tools so the user can add files.",
+        name: "choose_tm_pdf_tool",
+        title: "Choose a TM PDF tool",
+        description: "Open one of TM PDF's visible local document tools so the user can add files.",
         inputSchema: { type: "object", properties: { toolId: { type: "string", enum: tools.map((tool) => tool.id) } }, required: ["toolId"], additionalProperties: false },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
         async execute(input) {
@@ -190,7 +190,7 @@ export default function GTPdfClient() {
           const result = await processFiles([selectedFiles[index]], true);
           if (result) archive.file(`${String(index + 1).padStart(2, "0")}-${result.filename}`, result.output);
         }
-        const filename = `gt-pdf-${activeTool.id}-batch.zip`;
+        const filename = `tm-pdf-${activeTool.id}-batch.zip`;
         downloadBlob(await archive.generateAsync({ type: "blob", compression: "DEFLATE" }), filename);
         setMessage(`Done — ${selectedFiles.length} files were converted and downloaded as ${filename}.`);
       } catch (caught) {
@@ -335,7 +335,7 @@ export default function GTPdfClient() {
         const PptxGenJS = (await import("pptxgenjs")).default;
         const presentation = new PptxGenJS();
         presentation.layout = "LAYOUT_WIDE";
-        presentation.author = "GT PDF";
+        presentation.author = "TM PDF";
         presentation.subject = `Converted from ${selectedFiles[0].name}`;
         for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
           const page = await document.getPage(pageNumber);
@@ -516,7 +516,7 @@ export default function GTPdfClient() {
 
   return <main id="top">
     <header className="site-header">
-      <a className="brand" href="#top" aria-label="GT PDF home"><span className="brand-mark"><FileOutput size={22} /></span><span>GT <b>PDF</b></span></a>
+      <a className="brand" href="#top" aria-label="TM PDF home"><span className="brand-mark"><FileOutput size={22} /></span><span>TM <b>PDF</b></span></a>
       <nav className={mobileMenu ? "nav-links open" : "nav-links"} aria-label="Main navigation">
         <a href="#tools" onClick={() => setMobileMenu(false)}>All tools</a>
         <a href="#privacy" onClick={() => setMobileMenu(false)}>Privacy</a>
@@ -532,7 +532,7 @@ export default function GTPdfClient() {
         <p>Convert and edit PDF, Word, Excel, and PowerPoint files right in your browser. No account and no daily limit.</p>
         <div className="hero-actions"><a className="primary-button" href="#tools">Explore all tools <ArrowDown /></a><span><b>{tools.length}</b> free tools · unlimited use</span></div>
       </div>
-      <div className="hero-panel" aria-label="GT PDF product summary">
+      <div className="hero-panel" aria-label="TM PDF product summary">
         <div className="hero-panel-top"><span className="live-pill"><i /> Ready in your browser</span><Sparkles /></div>
         <div className="floating-docs" aria-hidden="true"><div className="doc-card back"><span /><span /><span /></div><div className="doc-card front"><b>PDF</b><span /><span /><span /></div><div className="spark spark-one">✦</div><div className="spark spark-two">✦</div></div>
         <div className="hero-stats"><div><strong>21</strong><span>free tools</span></div><div><strong>∞</strong><span>uses per day</span></div><div><strong>0</strong><span>files stored</span></div></div>
@@ -566,7 +566,7 @@ export default function GTPdfClient() {
             {activeTool.id === "crop" && <label className="option-field"><span>Crop margin: {cropMargin} pt</span><input type="range" min="0" max="72" step="2" value={cropMargin} onChange={(event) => setCropMargin(Number(event.target.value))} /><small>Applied evenly to all four sides.</small></label>}
             {activeTool.id === "sign" && <label className="option-field"><span>Signature name</span><input value={signature} maxLength={60} onChange={(event) => setSignature(event.target.value)} placeholder="Type your name" /><small>Placed at the bottom-right of the final page.</small></label>}
             {activeTool.id === "metadata" && <div className="metadata-grid"><label className="option-field"><span>Document title</span><input value={meta.title} onChange={(event) => setMeta({ ...meta, title: event.target.value })} /></label><label className="option-field"><span>Author</span><input value={meta.author} onChange={(event) => setMeta({ ...meta, author: event.target.value })} /></label><label className="option-field"><span>Subject</span><input value={meta.subject} onChange={(event) => setMeta({ ...meta, subject: event.target.value })} /></label><label className="option-field"><span>Keywords</span><input value={meta.keywords} onChange={(event) => setMeta({ ...meta, keywords: event.target.value })} placeholder="invoice, final, 2026" /></label></div>}
-            {activeTool.id === "optimize" && <p className="inline-note"><Gauge /> GT PDF will rebuild the file using compact object streams. Results vary depending on the source PDF.</p>}
+            {activeTool.id === "optimize" && <p className="inline-note"><Gauge /> TM PDF will rebuild the file using compact object streams. Results vary depending on the source PDF.</p>}
             {error && <p className="feedback error" role="alert">{error}</p>}{message && <p className="feedback success" role="status"><Check /> {message}</p>}
             <button className="process-button" onClick={() => void processFiles()} disabled={busy}>{busy ? <><span className="spinner" /> Processing on your device…</> : <><activeTool.Icon /> {activeTool.name} <Download /></>}</button>
           </div>}
@@ -575,8 +575,8 @@ export default function GTPdfClient() {
       </div>
     </div></section>
 
-    <section className="trust-section" id="privacy"><div className="trust-copy"><span className="eyebrow"><ShieldCheck /> Privacy built in</span><h2>Your document stays yours.</h2><p>GT PDF processes files in browser memory. Your documents are not uploaded, stored, or inspected by us.</p></div><div className="trust-steps"><div><span>01</span><strong>Choose locally</strong><p>Your browser reads the file from your device.</p></div><div><span>02</span><strong>Process privately</strong><p>The change happens in temporary browser memory.</p></div><div><span>03</span><strong>Download directly</strong><p>The finished PDF returns straight to you.</p></div></div></section>
+    <section className="trust-section" id="privacy"><div className="trust-copy"><span className="eyebrow"><ShieldCheck /> Privacy built in</span><h2>Your document stays yours.</h2><p>TM PDF processes files in browser memory. Your documents are not uploaded, stored, or inspected by us.</p></div><div className="trust-steps"><div><span>01</span><strong>Choose locally</strong><p>Your browser reads the file from your device.</p></div><div><span>02</span><strong>Process privately</strong><p>The change happens in temporary browser memory.</p></div><div><span>03</span><strong>Download directly</strong><p>The finished PDF returns straight to you.</p></div></div></section>
 
-    <footer><a className="brand" href="#top"><span className="brand-mark"><FileOutput /></span><span>GT <b>PDF</b></span></a><p>Twenty-one private document tools, free and unlimited.</p><div><a href="#tools">Tools</a><a href="#privacy">Privacy</a></div><small>© {new Date().getFullYear()} GT PDF. Files are processed locally in your browser.</small></footer>
+    <footer><a className="brand" href="#top"><span className="brand-mark"><FileOutput /></span><span>TM <b>PDF</b></span></a><p>Twenty-one private document tools, free and unlimited.</p><div><a href="#tools">Tools</a><a href="#privacy">Privacy</a></div><small>© {new Date().getFullYear()} TM PDF. Files are processed locally in your browser.</small></footer>
   </main>;
 }

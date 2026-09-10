@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GT PDF — Private PDF Tools",
+  title: "TM PDF — Private PDF Tools",
   description: "Twenty-one free and unlimited PDF, Word, Excel, and PowerPoint tools — all processed in your browser.",
   icons: {
     icon: "/favicon.svg",
