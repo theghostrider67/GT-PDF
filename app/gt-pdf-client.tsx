@@ -23,7 +23,7 @@ type Tool = {
 };
 
 const tools: Tool[] = [
-  { id: "pdf-word", name: "PDF to Word", short: "Pages to editable text", description: "Extract PDF text into an editable Word document.", Icon: FileText, color: "word", accept: "application/pdf,.pdf", multiple: false },
+  { id: "pdf-word", name: "PDF to Word", short: "Preserve page layout", description: "Create a page-faithful Word document that keeps the original visual context.", Icon: FileText, color: "word", accept: "application/pdf,.pdf", multiple: false },
   { id: "word-pdf", name: "Word to PDF", short: "DOCX to PDF pages", description: "Convert Word document text into a clean, shareable PDF.", Icon: FileText, color: "word", accept: ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document", multiple: false },
   { id: "pdf-powerpoint", name: "PDF to PowerPoint", short: "Pages to editable slides", description: "Place every PDF page onto its own PowerPoint slide.", Icon: Presentation, color: "powerpoint", accept: "application/pdf,.pdf", multiple: false },
   { id: "powerpoint-pdf", name: "PowerPoint to PDF", short: "Slides to PDF pages", description: "Convert PPTX slide text into a readable PDF deck.", Icon: Presentation, color: "powerpoint", accept: ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation", multiple: false },
@@ -64,7 +64,6 @@ const downloadBlob = (blob: Blob, filename: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 const downloadBytes = (bytes: Uint8Array, filename: string, type = "application/pdf") => downloadBlob(new Blob([bytes as BlobPart], { type }), filename);
-const escapeXml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&apos;");
 
 function parsePageSequence(input: string, total: number, unique = true) {
   if (!input.trim()) throw new Error("Enter a page range, for example 1-3, 6.");
@@ -297,13 +296,37 @@ export default function GTPdfClient() {
         output = new Uint8Array(bytes);
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
       } else if (activeTool.id === "pdf-word") {
-        const { pages } = await readPdfPages();
+        const { document } = await readPdfPages();
         const { default: JSZip } = await import("jszip");
         const zip = new JSZip();
-        zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+        const relationships: string[] = [];
+        const body: string[] = [];
+        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+          const page = await document.getPage(pageNumber);
+          const viewport = page.getViewport({ scale: 1.65 });
+          const canvas = window.document.createElement("canvas");
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("This browser could not render the PDF page.");
+          await page.render({ canvas, canvasContext: context, viewport }).promise;
+          const relationshipId = `rId${pageNumber + 1}`;
+          const mediaName = `page-${pageNumber}.png`;
+          const imageData = canvas.toDataURL("image/png").split(",")[1];
+          zip.folder("word/media")?.file(mediaName, imageData, { base64: true });
+          relationships.push(`<Relationship Id="${relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaName}"/>`);
+          const maxWidth = 5943600;
+          const maxHeight = 8686800;
+          const fit = Math.min(maxWidth / (viewport.width * 12700), maxHeight / (viewport.height * 12700));
+          const width = Math.round(viewport.width * 12700 * fit);
+          const height = Math.round(viewport.height * 12700 * fit);
+          body.push(`<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${width}" cy="${height}"/><wp:docPr id="${pageNumber}" name="PDF page ${pageNumber}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${pageNumber}" name="${mediaName}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${width}" cy="${height}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`);
+          if (pageNumber < document.numPages) body.push(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`);
+        }
+        zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
         zip.folder("_rels")?.file(".rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
-        const body = pages.map((lines, pageIndex) => `${lines.map((line) => `<w:p><w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`).join("")}${pageIndex < pages.length - 1 ? `<w:p><w:r><w:br w:type="page"/></w:r></w:p>` : ""}`).join("");
-        zip.folder("word")?.file("document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr></w:body></w:document>`);
+        zip.folder("word/_rels")?.file("document.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships.join("")}</Relationships>`);
+        zip.folder("word")?.file("document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body.join("")}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0"/></w:sectPr></w:body></w:document>`);
         filename = `${safeBaseName(selectedFiles[0].name)}.docx`;
         output = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
