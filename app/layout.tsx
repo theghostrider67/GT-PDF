@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "GT PDF — Private PDF Tools",
-  description: "Fast, private PDF tools for merging, organizing, rotating, signing, and more — all in your browser.",
+  description: "Twenty-one free and unlimited PDF, Word, Excel, and PowerPoint tools — all processed in your browser.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

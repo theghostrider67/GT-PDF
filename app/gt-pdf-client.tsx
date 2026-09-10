@@ -1,15 +1,16 @@
 "use client";
 
 import {
-  ArrowDown, ArrowRight, ArrowUp, Check, Copy, Crop, Crown, Download,
-  FileImage, FileOutput, FilePenLine, Files, Gauge, Hash, Layers3,
-  ListRestart, LockKeyhole, LogOut, Menu, Minimize2, Plus, RotateCw,
-  ShieldCheck, Signature, Sparkles, Split, Stamp, Trash2, UploadCloud,
-  UserCircle2, X,
+  ArrowDown, ArrowUp, Check, Copy, Crop, Download,
+  FileImage, FileOutput, FilePenLine, FileSpreadsheet, FileText, Files,
+  Gauge, Hash, Layers3, ListRestart, LockKeyhole, Menu, Minimize2, Plus,
+  Presentation, RotateCw, ShieldCheck, Signature, Sparkles, Split, Stamp,
+  Table2, Trash2, UploadCloud, X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
-type ToolId = "merge" | "extract" | "organize" | "rotate" | "optimize" | "number" | "watermark" | "images" | "duplicate" | "delete" | "blank" | "reverse" | "crop" | "sign" | "metadata";
+type ToolId = "merge" | "extract" | "organize" | "rotate" | "optimize" | "number" | "watermark" | "images" | "duplicate" | "delete" | "blank" | "reverse" | "crop" | "sign" | "metadata" | "pdf-excel" | "excel-pdf" | "pdf-powerpoint" | "powerpoint-pdf" | "pdf-word" | "word-pdf";
 type Tool = {
   id: ToolId;
   name: string;
@@ -19,7 +20,6 @@ type Tool = {
   color: string;
   accept: string;
   multiple: boolean;
-  pro?: boolean;
 };
 
 const tools: Tool[] = [
@@ -35,9 +35,15 @@ const tools: Tool[] = [
   { id: "delete", name: "Delete pages", short: "Remove page ranges", description: "Remove unwanted pages and keep everything else.", Icon: Trash2, color: "red", accept: "application/pdf,.pdf", multiple: false },
   { id: "blank", name: "Add blank page", short: "Append a clean page", description: "Add a fresh A4 page to the end of a PDF.", Icon: FileOutput, color: "slate", accept: "application/pdf,.pdf", multiple: false },
   { id: "reverse", name: "Reverse pages", short: "Flip page order", description: "Reverse the complete page order in one click.", Icon: ListRestart, color: "lime", accept: "application/pdf,.pdf", multiple: false },
-  { id: "crop", name: "Crop PDF", short: "Trim page margins", description: "Apply a consistent crop margin to every page.", Icon: Crop, color: "pro", accept: "application/pdf,.pdf", multiple: false, pro: true },
-  { id: "sign", name: "Sign PDF", short: "Add a text signature", description: "Place your typed signature on the final page.", Icon: Signature, color: "pro", accept: "application/pdf,.pdf", multiple: false, pro: true },
-  { id: "metadata", name: "Edit metadata", short: "Title, author & topic", description: "Update document title, author, subject, and keywords.", Icon: FilePenLine, color: "pro", accept: "application/pdf,.pdf", multiple: false, pro: true },
+  { id: "crop", name: "Crop PDF", short: "Trim page margins", description: "Apply a consistent crop margin to every page.", Icon: Crop, color: "yellow", accept: "application/pdf,.pdf", multiple: false },
+  { id: "sign", name: "Sign PDF", short: "Add a text signature", description: "Place your typed signature on the final page.", Icon: Signature, color: "cyan", accept: "application/pdf,.pdf", multiple: false },
+  { id: "metadata", name: "Edit metadata", short: "Title, author & topic", description: "Update document title, author, subject, and keywords.", Icon: FilePenLine, color: "pink", accept: "application/pdf,.pdf", multiple: false },
+  { id: "pdf-excel", name: "PDF to Excel", short: "Extract pages to sheets", description: "Extract page text into an editable Excel workbook.", Icon: FileSpreadsheet, color: "excel", accept: "application/pdf,.pdf", multiple: false },
+  { id: "excel-pdf", name: "Excel to PDF", short: "Sheets to printable pages", description: "Turn spreadsheet sheets and cell values into a clean PDF.", Icon: Table2, color: "excel", accept: ".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv", multiple: false },
+  { id: "pdf-powerpoint", name: "PDF to PowerPoint", short: "Pages to editable slides", description: "Place every PDF page onto its own PowerPoint slide.", Icon: Presentation, color: "powerpoint", accept: "application/pdf,.pdf", multiple: false },
+  { id: "powerpoint-pdf", name: "PowerPoint to PDF", short: "Slides to PDF pages", description: "Convert PPTX slide text into a readable PDF deck.", Icon: Presentation, color: "powerpoint", accept: ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation", multiple: false },
+  { id: "pdf-word", name: "PDF to Word", short: "Pages to editable text", description: "Extract PDF text into an editable Word document.", Icon: FileText, color: "word", accept: "application/pdf,.pdf", multiple: false },
+  { id: "word-pdf", name: "Word to PDF", short: "DOCX to PDF pages", description: "Convert Word document text into a clean, shareable PDF.", Icon: FileText, color: "word", accept: ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document", multiple: false },
 ];
 
 const formatBytes = (bytes: number) => {
@@ -47,8 +53,7 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
 };
 const safeBaseName = (name: string) => name.replace(/\.[^.]+$/, "").replace(/[^a-z0-9-_]+/gi, "-").replace(/^-|-$/g, "") || "document";
-const downloadBytes = (bytes: Uint8Array, filename: string) => {
-  const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
+const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -58,6 +63,8 @@ const downloadBytes = (bytes: Uint8Array, filename: string) => {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
+const downloadBytes = (bytes: Uint8Array, filename: string, type = "application/pdf") => downloadBlob(new Blob([bytes as BlobPart], { type }), filename);
+const escapeXml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&apos;");
 
 function parsePageSequence(input: string, total: number, unique = true) {
   if (!input.trim()) throw new Error("Enter a page range, for example 1-3, 6.");
@@ -83,9 +90,7 @@ function parsePageSequence(input: string, total: number, unique = true) {
   return unique ? [...new Set(pages)] : pages;
 }
 
-type User = { displayName: string; email: string } | null;
-
-export default function GTPdfClient({ user, signInPath, signOutPath }: { user: User; signInPath: string; signOutPath: string }) {
+export default function GTPdfClient() {
   const [activeTool, setActiveTool] = useState<Tool>(tools[0]);
   const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -93,7 +98,6 @@ export default function GTPdfClient({ user, signInPath, signOutPath }: { user: U
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [showLocked, setShowLocked] = useState(false);
   const [pageRange, setPageRange] = useState("1");
   const [rotation, setRotation] = useState(90);
   const [numberPosition, setNumberPosition] = useState("bottom-center");
@@ -103,18 +107,16 @@ export default function GTPdfClient({ user, signInPath, signOutPath }: { user: U
   const [signature, setSignature] = useState("");
   const [meta, setMeta] = useState({ title: "", author: "", subject: "", keywords: "" });
   const fileInput = useRef<HTMLInputElement>(null);
-  const freeCount = useMemo(() => tools.filter((tool) => !tool.pro).length, []);
 
   const selectTool = useCallback((tool: Tool) => {
     setActiveTool(tool);
     setFiles([]);
     setMessage("");
     setError("");
-    setShowLocked(Boolean(tool.pro && !user));
     setMobileMenu(false);
     setPageRange(tool.id === "organize" ? "3, 1, 2" : "1");
     requestAnimationFrame(() => document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     const modelContext = (document as Document & { modelContext?: { registerTool: (tool: { name: string; title: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean; untrustedContentHint: boolean }; execute: (input: { toolId?: string }) => Promise<object> }, options: { signal: AbortSignal }) => void | Promise<void> } }).modelContext;
@@ -131,21 +133,26 @@ export default function GTPdfClient({ user, signInPath, signOutPath }: { user: U
           const selected = tools.find((tool) => tool.id === input.toolId);
           if (!selected) throw new Error("Unknown PDF tool.");
           selectTool(selected);
-          return { selectedTool: selected.id, status: selected.pro && !user ? "sign_in_required" : "ready_for_local_files" };
+          return { selectedTool: selected.id, status: "ready_for_local_files" };
         },
       }, { signal: lifecycle.signal })).catch(() => undefined);
     } catch { /* WebMCP is optional. */ }
     return () => lifecycle.abort();
-  }, [selectTool, user]);
+  }, [selectTool]);
 
   const addFiles = (incoming: File[]) => {
     setError("");
     setMessage("");
-    const valid = incoming.filter((file) => activeTool.id === "images"
-      ? ["image/jpeg", "image/png"].includes(file.type) || /\.(jpe?g|png)$/i.test(file.name)
-      : file.type === "application/pdf" || /\.pdf$/i.test(file.name));
+    const valid = incoming.filter((file) => {
+      if (activeTool.id === "images") return ["image/jpeg", "image/png"].includes(file.type) || /\.(jpe?g|png)$/i.test(file.name);
+      if (["excel-pdf"].includes(activeTool.id)) return /\.(xlsx?|csv)$/i.test(file.name);
+      if (activeTool.id === "powerpoint-pdf") return /\.pptx$/i.test(file.name);
+      if (activeTool.id === "word-pdf") return /\.docx$/i.test(file.name);
+      return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    });
     if (!valid.length) {
-      setError(activeTool.id === "images" ? "Choose JPG or PNG images." : "Choose a PDF file.");
+      const wanted = activeTool.id === "images" ? "JPG or PNG images" : activeTool.id === "excel-pdf" ? "an XLSX, XLS, or CSV file" : activeTool.id === "powerpoint-pdf" ? "a PPTX file" : activeTool.id === "word-pdf" ? "a DOCX file" : "a PDF file";
+      setError(`Choose ${wanted}.`);
       return;
     }
     if (!activeTool.multiple) setFiles([valid[0]]);
@@ -160,7 +167,7 @@ export default function GTPdfClient({ user, signInPath, signOutPath }: { user: U
   });
 
   const processFiles = async () => {
-    if (!files.length || (activeTool.pro && !user)) return;
+    if (!files.length) return;
     if (activeTool.id === "merge" && files.length < 2) {
       setError("Add at least two PDFs to merge.");
       return;
@@ -170,9 +177,162 @@ export default function GTPdfClient({ user, signInPath, signOutPath }: { user: U
     setMessage("");
     try {
       const { degrees, PDFDocument, rgb, StandardFonts } = await import("pdf-lib");
+      const printable = (value: unknown) => String(value ?? "").replace(/[^\x20-\x7E\u00A0-\u00FF]/g, "?");
+      const makeTextPdf = async (groups: Array<{ title: string; lines: string[] }>, landscape = false) => {
+        const result = await PDFDocument.create();
+        const regular = await result.embedFont(StandardFonts.Helvetica);
+        const bold = await result.embedFont(StandardFonts.HelveticaBold);
+        const size: [number, number] = landscape ? [841.89, 595.28] : [595.28, 841.89];
+        const margin = 42;
+        const fontSize = 10;
+        const lineHeight = 15;
+        const wrap = (raw: string, maxWidth: number) => {
+          const words = printable(raw).split(/\s+/).filter(Boolean);
+          if (!words.length) return [""];
+          const lines: string[] = [];
+          let current = "";
+          for (const word of words) {
+            const candidate = current ? `${current} ${word}` : word;
+            if (regular.widthOfTextAtSize(candidate, fontSize) <= maxWidth) current = candidate;
+            else {
+              if (current) lines.push(current);
+              current = word.length > 95 ? `${word.slice(0, 92)}...` : word;
+            }
+          }
+          if (current) lines.push(current);
+          return lines;
+        };
+        for (const group of groups) {
+          let page = result.addPage(size);
+          let y = size[1] - margin;
+          if (group.title) {
+            page.drawText(printable(group.title), { x: margin, y, size: 16, font: bold, color: rgb(0.15, 0.12, 0.42) });
+            y -= 28;
+          }
+          for (const raw of group.lines) {
+            const wrapped = wrap(raw, size[0] - margin * 2);
+            for (const line of wrapped) {
+              if (y < margin) {
+                page = result.addPage(size);
+                y = size[1] - margin;
+              }
+              page.drawText(line, { x: margin, y, size: fontSize, font: regular, color: rgb(0.1, 0.11, 0.18) });
+              y -= lineHeight;
+            }
+            y -= 3;
+          }
+        }
+        return result.save({ useObjectStreams: true });
+      };
+      const readPdfPages = async () => {
+        const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+        const document = await pdfjs.getDocument({ data: new Uint8Array(await files[0].arrayBuffer()) }).promise;
+        const pages: string[][] = [];
+        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+          const page = await document.getPage(pageNumber);
+          const content = await page.getTextContent();
+          const items = content.items.filter((item): item is typeof item & { str: string; transform: number[] } => "str" in item && "transform" in item);
+          const rows = new Map<number, Array<{ x: number; text: string }>>();
+          for (const item of items) {
+            const y = Math.round(item.transform[5] / 3) * 3;
+            const row = rows.get(y) ?? [];
+            row.push({ x: item.transform[4], text: item.str });
+            rows.set(y, row);
+          }
+          const lines = [...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, row]) => row.sort((a, b) => a.x - b.x).map((cell) => cell.text).join(" ").trim()).filter(Boolean);
+          pages.push(lines);
+        }
+        return { document, pages };
+      };
       let output: Uint8Array;
       let filename = `${safeBaseName(files[0].name)}-${activeTool.id}.pdf`;
-      if (activeTool.id === "merge") {
+      if (activeTool.id === "pdf-excel") {
+        const { pages } = await readPdfPages();
+        const XLSX = await import("xlsx");
+        const workbook = XLSX.utils.book_new();
+        pages.forEach((lines, index) => {
+          const sheet = XLSX.utils.aoa_to_sheet(lines.map((line) => line.split(/\s{2,}|\s\|\s/)));
+          XLSX.utils.book_append_sheet(workbook, sheet, `Page ${index + 1}`.slice(0, 31));
+        });
+        const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: true }) as ArrayBuffer;
+        filename = `${safeBaseName(files[0].name)}.xlsx`;
+        downloadBytes(new Uint8Array(bytes), filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        setMessage(`Done — ${filename} has been downloaded.`);
+        return;
+      } else if (activeTool.id === "pdf-word") {
+        const { pages } = await readPdfPages();
+        const { default: JSZip } = await import("jszip");
+        const zip = new JSZip();
+        zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+        zip.folder("_rels")?.file(".rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+        const body = pages.map((lines, pageIndex) => `${lines.map((line) => `<w:p><w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`).join("")}${pageIndex < pages.length - 1 ? `<w:p><w:r><w:br w:type="page"/></w:r></w:p>` : ""}`).join("");
+        zip.folder("word")?.file("document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr></w:body></w:document>`);
+        filename = `${safeBaseName(files[0].name)}.docx`;
+        downloadBlob(await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", compression: "DEFLATE" }), filename);
+        setMessage(`Done — ${filename} has been downloaded.`);
+        return;
+      } else if (activeTool.id === "pdf-powerpoint") {
+        const { document } = await readPdfPages();
+        const PptxGenJS = (await import("pptxgenjs")).default;
+        const presentation = new PptxGenJS();
+        presentation.layout = "LAYOUT_WIDE";
+        presentation.author = "GT PDF";
+        presentation.subject = `Converted from ${files[0].name}`;
+        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+          const page = await document.getPage(pageNumber);
+          const viewport = page.getViewport({ scale: 1.4 });
+          const canvas = window.document.createElement("canvas");
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("This browser could not render the PDF page.");
+          await page.render({ canvas, canvasContext: context, viewport }).promise;
+          const slide = presentation.addSlide();
+          slide.background = { color: "F7F8FF" };
+          const pageRatio = viewport.width / viewport.height;
+          const boxRatio = 13.333 / 7.5;
+          const width = pageRatio > boxRatio ? 13.333 : 7.5 * pageRatio;
+          const height = pageRatio > boxRatio ? 13.333 / pageRatio : 7.5;
+          slide.addImage({ data: canvas.toDataURL("image/png"), x: (13.333 - width) / 2, y: (7.5 - height) / 2, w: width, h: height });
+        }
+        filename = `${safeBaseName(files[0].name)}.pptx`;
+        await presentation.writeFile({ fileName: filename, compression: true });
+        setMessage(`Done — ${filename} has been downloaded.`);
+        return;
+      } else if (activeTool.id === "excel-pdf") {
+        const XLSX = await import("xlsx");
+        const workbook = XLSX.read(await files[0].arrayBuffer(), { type: "array" });
+        const groups = workbook.SheetNames.map((sheetName) => {
+          const rows = XLSX.utils.sheet_to_json<(string | number | boolean)[]>(workbook.Sheets[sheetName], { header: 1, defval: "" });
+          return { title: sheetName, lines: rows.map((row) => row.map((cell) => String(cell)).join("  |  ")) };
+        });
+        output = await makeTextPdf(groups, true);
+        filename = `${safeBaseName(files[0].name)}.pdf`;
+      } else if (activeTool.id === "word-pdf") {
+        const { default: JSZip } = await import("jszip");
+        const zip = await JSZip.loadAsync(await files[0].arrayBuffer());
+        const xml = await zip.file("word/document.xml")?.async("text");
+        if (!xml) throw new Error("This DOCX file does not contain a readable document body.");
+        const document = new DOMParser().parseFromString(xml, "application/xml");
+        const paragraphs = Array.from(document.getElementsByTagName("w:p")).map((paragraph) => Array.from(paragraph.getElementsByTagName("w:t")).map((node) => node.textContent ?? "").join("")).filter(Boolean);
+        output = await makeTextPdf([{ title: safeBaseName(files[0].name), lines: paragraphs }]);
+        filename = `${safeBaseName(files[0].name)}.pdf`;
+      } else if (activeTool.id === "powerpoint-pdf") {
+        const { default: JSZip } = await import("jszip");
+        const zip = await JSZip.loadAsync(await files[0].arrayBuffer());
+        const slideFiles = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]));
+        if (!slideFiles.length) throw new Error("This PPTX file does not contain readable slides.");
+        const groups: Array<{ title: string; lines: string[] }> = [];
+        for (let index = 0; index < slideFiles.length; index += 1) {
+          const xml = await zip.file(slideFiles[index])?.async("text");
+          const document = new DOMParser().parseFromString(xml ?? "", "application/xml");
+          const lines = Array.from(document.getElementsByTagName("a:t")).map((node) => node.textContent?.trim() ?? "").filter(Boolean);
+          groups.push({ title: `Slide ${index + 1}`, lines });
+        }
+        output = await makeTextPdf(groups, true);
+        filename = `${safeBaseName(files[0].name)}.pdf`;
+      } else if (activeTool.id === "merge") {
         const result = await PDFDocument.create();
         for (const file of files) {
           const source = await PDFDocument.load(await file.arrayBuffer());
@@ -292,6 +452,8 @@ export default function GTPdfClient({ user, signInPath, signOutPath }: { user: U
 
   const rangeLabel = activeTool.id === "organize" ? "New page order" : activeTool.id === "delete" ? "Pages to remove" : activeTool.id === "duplicate" ? "Pages to copy" : "Pages to keep";
   const rangeHelp = activeTool.id === "organize" ? "Use any order, including reverse ranges: 5-1, 8, 10." : "Use commas and ranges, for example 1-3, 6.";
+  const inputNoun = activeTool.id === "images" ? "images" : activeTool.id === "excel-pdf" ? "an Excel file" : activeTool.id === "powerpoint-pdf" ? "a PowerPoint file" : activeTool.id === "word-pdf" ? "a Word file" : activeTool.multiple ? "PDFs" : "a PDF";
+  const fileTag = activeTool.id === "images" ? "IMG" : activeTool.id === "excel-pdf" ? "XLS" : activeTool.id === "powerpoint-pdf" ? "PPT" : activeTool.id === "word-pdf" ? "DOC" : "PDF";
 
   return <main id="top">
     <header className="site-header">
@@ -299,8 +461,7 @@ export default function GTPdfClient({ user, signInPath, signOutPath }: { user: U
       <nav className={mobileMenu ? "nav-links open" : "nav-links"} aria-label="Main navigation">
         <a href="#tools" onClick={() => setMobileMenu(false)}>All tools</a>
         <a href="#privacy" onClick={() => setMobileMenu(false)}>Privacy</a>
-        <a href="#pro" onClick={() => setMobileMenu(false)}>Pro access</a>
-        {user ? <div className="account-chip"><span>{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><small>Pro tools unlocked</small></div><a href={signOutPath} target="_top" aria-label="Sign out"><LogOut /></a></div> : <a className="login-button" href={signInPath} target="_top"><UserCircle2 /> Sign in</a>}
+        <span className="free-access"><Check /> Free & unlimited</span>
       </nav>
       <button className="menu-button" onClick={() => setMobileMenu((value) => !value)} aria-label="Toggle navigation" aria-expanded={mobileMenu}>{mobileMenu ? <X /> : <Menu />}</button>
     </header>
@@ -309,36 +470,36 @@ export default function GTPdfClient({ user, signInPath, signOutPath }: { user: U
       <div className="hero-copy">
         <span className="eyebrow"><ShieldCheck /> Files never leave your device</span>
         <h1>PDF jobs done.<br /><em>Right here.</em></h1>
-        <p>Fast, private PDF tools for everyday work. Choose a task below and finish in a few clicks.</p>
-        <div className="hero-actions"><a className="primary-button" href="#tools">Explore all tools <ArrowDown /></a><span><b>{freeCount}</b> free tools · no upload</span></div>
+        <p>Convert and edit PDF, Word, Excel, and PowerPoint files right in your browser. No account and no daily limit.</p>
+        <div className="hero-actions"><a className="primary-button" href="#tools">Explore all tools <ArrowDown /></a><span><b>{tools.length}</b> free tools · unlimited use</span></div>
       </div>
       <div className="hero-panel" aria-label="GT PDF product summary">
         <div className="hero-panel-top"><span className="live-pill"><i /> Ready in your browser</span><Sparkles /></div>
         <div className="floating-docs" aria-hidden="true"><div className="doc-card back"><span /><span /><span /></div><div className="doc-card front"><b>PDF</b><span /><span /><span /></div><div className="spark spark-one">✦</div><div className="spark spark-two">✦</div></div>
-        <div className="hero-stats"><div><strong>15</strong><span>total tools</span></div><div><strong>100%</strong><span>local processing</span></div><div><strong>0</strong><span>files stored</span></div></div>
+        <div className="hero-stats"><div><strong>21</strong><span>free tools</span></div><div><strong>∞</strong><span>uses per day</span></div><div><strong>0</strong><span>files stored</span></div></div>
       </div>
     </section>
 
     <section className="tools-section" id="tools">
-      <div className="section-heading"><div><span className="kicker">Everything up front</span><h2>What do you need to do?</h2></div><div className="legend"><span><i className="free-dot" /> {freeCount} free</span><span><Crown /> 3 Pro with sign-in</span></div></div>
+      <div className="section-heading"><div><span className="kicker">All tools. No limits.</span><h2>What do you need to do?</h2></div><div className="legend"><span><i className="free-dot" /> 21 free tools</span><span><Sparkles /> Unlimited times</span></div></div>
       <div className="tool-grid">{tools.map((tool, index) => <button key={tool.id} className={`tool-card ${activeTool.id === tool.id ? "active" : ""}`} onClick={() => selectTool(tool)}>
         <span className={`tool-icon ${tool.color}`}><tool.Icon /></span>
-        <span className="tool-card-copy"><span className="tool-title"><strong>{tool.name}</strong>{tool.pro && <span className="pro-badge"><Crown /> Pro</span>}</span><small>{tool.short}</small></span>
+        <span className="tool-card-copy"><span className="tool-title"><strong>{tool.name}</strong></span><small>{tool.short}</small></span>
         <span className="tool-index">{String(index + 1).padStart(2, "0")}</span>
       </button>)}</div>
     </section>
 
     <section className="workspace-wrap" id="workspace"><div className="workspace-shell">
-      <div className="workspace-heading"><span className={`tool-icon ${activeTool.color}`}><activeTool.Icon /></span><div><span className="kicker">Active tool {activeTool.pro && "· Pro"}</span><h2>{activeTool.name}</h2><p>{activeTool.description}</p></div></div>
+      <div className="workspace-heading"><span className={`tool-icon ${activeTool.color}`}><activeTool.Icon /></span><div><span className="kicker">Free · unlimited</span><h2>{activeTool.name}</h2><p>{activeTool.description}</p></div></div>
       <div className="workspace-card">
-        {showLocked ? <div className="locked-panel"><span className="locked-icon"><LockKeyhole /></span><span className="pro-badge"><Crown /> Pro access</span><h3>Sign in to unlock this tool</h3><p>Your account unlocks 3 of 15 tools — exactly 20% of GT PDF — at no charge during beta.</p><a className="primary-button" href={signInPath} target="_top"><UserCircle2 /> Sign in with ChatGPT</a><small>The other {freeCount} tools stay free without an account.</small></div> : <>
+        <>
           <div className={dragging ? "dropzone dragging" : "dropzone"} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles([...event.dataTransfer.files]); }}>
             <input ref={fileInput} type="file" accept={activeTool.accept} multiple={activeTool.multiple} hidden onChange={(event) => addFiles([...(event.target.files ?? [])])} />
-            <span className="upload-icon"><UploadCloud /></span><h3>Drop {activeTool.id === "images" ? "images" : activeTool.multiple ? "PDFs" : "a PDF"} here</h3><p>or choose from your device</p><button className="secondary-button" onClick={() => fileInput.current?.click()}><Plus /> Choose {activeTool.id === "images" ? "images" : "files"}</button><small><LockKeyhole /> Processed locally in this browser</small>
+            <span className="upload-icon"><UploadCloud /></span><h3>Drop {inputNoun} here</h3><p>or choose from your device</p><button className="secondary-button" onClick={() => fileInput.current?.click()}><Plus /> Choose {activeTool.id === "images" ? "images" : "file"}</button><small><LockKeyhole /> Processed locally in this browser · no usage limit</small>
           </div>
           {files.length > 0 && <div className="job-panel">
             <div className="file-list-heading"><strong>{files.length} {files.length === 1 ? "file" : "files"} ready</strong><span>{formatBytes(files.reduce((sum, file) => sum + file.size, 0))}</span></div>
-            <div className="file-list">{files.map((file, index) => <div className="file-row" key={`${file.name}-${file.lastModified}-${index}`}><span className="file-type">{activeTool.id === "images" ? "IMG" : "PDF"}</span><span className="file-name"><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></span>{activeTool.multiple && <span className="order-buttons"><button onClick={() => moveFile(index, -1)} disabled={index === 0} aria-label={`Move ${file.name} up`}><ArrowUp /></button><button onClick={() => moveFile(index, 1)} disabled={index === files.length - 1} aria-label={`Move ${file.name} down`}><ArrowDown /></button></span>}<button className="remove-button" onClick={() => setFiles((current) => current.filter((_, position) => position !== index))} aria-label={`Remove ${file.name}`}><Trash2 /></button></div>)}</div>
+            <div className="file-list">{files.map((file, index) => <div className="file-row" key={`${file.name}-${file.lastModified}-${index}`}><span className="file-type">{fileTag}</span><span className="file-name"><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></span>{activeTool.multiple && <span className="order-buttons"><button onClick={() => moveFile(index, -1)} disabled={index === 0} aria-label={`Move ${file.name} up`}><ArrowUp /></button><button onClick={() => moveFile(index, 1)} disabled={index === files.length - 1} aria-label={`Move ${file.name} down`}><ArrowDown /></button></span>}<button className="remove-button" onClick={() => setFiles((current) => current.filter((_, position) => position !== index))} aria-label={`Remove ${file.name}`}><Trash2 /></button></div>)}</div>
             {["extract", "organize", "duplicate", "delete"].includes(activeTool.id) && <label className="option-field"><span>{rangeLabel}</span><input value={pageRange} onChange={(event) => setPageRange(event.target.value)} placeholder="1-3, 6, 9-12" /><small>{rangeHelp}</small></label>}
             {activeTool.id === "rotate" && <fieldset className="option-field"><legend>Rotate every page</legend><div className="choice-row">{[90, 180, 270].map((angle) => <button type="button" className={rotation === angle ? "choice active" : "choice"} key={angle} onClick={() => setRotation(angle)}>{angle}°</button>)}</div></fieldset>}
             {activeTool.id === "number" && <label className="option-field"><span>Number position</span><select value={numberPosition} onChange={(event) => setNumberPosition(event.target.value)}><option value="bottom-left">Bottom left</option><option value="bottom-center">Bottom center</option><option value="bottom-right">Bottom right</option><option value="top-left">Top left</option><option value="top-center">Top center</option><option value="top-right">Top right</option></select></label>}
@@ -351,14 +512,12 @@ export default function GTPdfClient({ user, signInPath, signOutPath }: { user: U
             <button className="process-button" onClick={processFiles} disabled={busy}>{busy ? <><span className="spinner" /> Processing on your device…</> : <><activeTool.Icon /> {activeTool.name} <Download /></>}</button>
           </div>}
           {!files.length && error && <p className="feedback error standalone" role="alert">{error}</p>}
-        </>}
+        </>
       </div>
     </div></section>
 
     <section className="trust-section" id="privacy"><div className="trust-copy"><span className="eyebrow"><ShieldCheck /> Privacy built in</span><h2>Your document stays yours.</h2><p>GT PDF processes files in browser memory. Your documents are not uploaded, stored, or inspected by us.</p></div><div className="trust-steps"><div><span>01</span><strong>Choose locally</strong><p>Your browser reads the file from your device.</p></div><div><span>02</span><strong>Process privately</strong><p>The change happens in temporary browser memory.</p></div><div><span>03</span><strong>Download directly</strong><p>The finished PDF returns straight to you.</p></div></div></section>
 
-    <section className="pro-section" id="pro"><div className="pro-copy"><span className="pro-badge"><Crown /> GT PDF Pro access</span><h2>Sign in. Unlock 20% more.</h2><p>Get Crop PDF, Sign PDF, and Edit metadata — 3 of the 15 tools — while every core tool stays available without an account.</p>{user ? <div className="unlocked"><Check /> Pro tools are unlocked for {user.displayName}</div> : <a className="light-button" href={signInPath} target="_top">Unlock 3 Pro tools <ArrowRight /></a>}</div><div className="pro-list">{tools.filter((tool) => tool.pro).map((tool) => <button key={tool.id} onClick={() => selectTool(tool)}><span className="tool-icon pro"><tool.Icon /></span><span><strong>{tool.name}</strong><small>{tool.short}</small></span><ArrowRight /></button>)}</div></section>
-
-    <footer><a className="brand" href="#top"><span className="brand-mark"><FileOutput /></span><span>GT <b>PDF</b></span></a><p>Private PDF tools that work right where you are.</p><div><a href="#tools">Tools</a><a href="#privacy">Privacy</a><a href="#pro">Pro</a></div><small>© {new Date().getFullYear()} GT PDF. Files are processed locally in your browser.</small></footer>
+    <footer><a className="brand" href="#top"><span className="brand-mark"><FileOutput /></span><span>GT <b>PDF</b></span></a><p>Twenty-one private document tools, free and unlimited.</p><div><a href="#tools">Tools</a><a href="#privacy">Privacy</a></div><small>© {new Date().getFullYear()} GT PDF. Files are processed locally in your browser.</small></footer>
   </main>;
 }

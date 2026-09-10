@@ -30,6 +30,8 @@ button { color:inherit; }
 .nav-links>a:not(.login-button):hover { color:var(--indigo); }
 .login-button { min-height:42px; padding:0 15px; display:inline-flex; align-items:center; gap:8px; color:white; background:var(--ink); border-radius:12px; box-shadow:3px 3px 0 var(--lime); }
 .login-button svg { width:18px; }
+.free-access { min-height:40px; padding:0 13px; display:inline-flex; align-items:center; gap:7px; border-radius:11px; color:#244b31; background:#e7f8d0; border:1px solid #c5e99a; font-size:.78rem; font-weight:850; }
+.free-access svg { width:16px; }
 .menu-button { display:none; border:0; background:transparent; padding:8px; }
 .account-chip { display:flex; align-items:center; gap:9px; border:1px solid var(--line); background:white; border-radius:13px; padding:6px 8px; box-shadow:0 5px 16px rgba(32,27,84,.07); }
 .account-chip>span { width:31px; height:31px; display:grid; place-items:center; border-radius:9px; background:var(--indigo); color:white; font-weight:900; }
@@ -94,6 +96,7 @@ button { color:inherit; }
 .tool-icon { flex:0 0 auto; width:39px; height:39px; border-radius:11px; display:grid; place-items:center; }
 .tool-icon svg { width:19px; }
 .tool-icon.coral { background:#ffe1dc;color:#c94736 }.tool-icon.blue { background:#ddecff;color:#2867aa }.tool-icon.violet { background:#e9e4ff;color:#6244bd }.tool-icon.mint { background:#d9f8e9;color:#267453 }.tool-icon.yellow { background:#fff1bd;color:#8b6510 }.tool-icon.cyan { background:#d6f5f6;color:#217176 }.tool-icon.pink { background:#ffe0ee;color:#a83c6e }.tool-icon.orange { background:#ffe7d2;color:#a55720 }.tool-icon.indigo { background:#e4e2ff;color:#4c3ce6 }.tool-icon.red { background:#ffe1e1;color:#ae3434 }.tool-icon.slate { background:#e6eaf0;color:#4d5e73 }.tool-icon.lime { background:#e8fac7;color:#55771e }.tool-icon.pro { color:#614400;background:linear-gradient(145deg,#fff3b6,#f9cb56); }
+.tool-icon.excel { background:#dcf5e8; color:#16734a; }.tool-icon.word { background:#dcecff; color:#215fa9; }.tool-icon.powerpoint { background:#ffe2d7; color:#b74724; }
 .tool-card-copy { min-width:0; display:flex; flex-direction:column; gap:6px; padding-top:1px; }
 .tool-title { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 .tool-card-copy strong { font-size:.86rem; line-height:1.18; }
