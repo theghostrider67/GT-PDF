@@ -8,7 +8,7 @@ import {
   Table2, Trash2, UploadCloud, X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
+const pdfWorkerUrl = "/pdf.worker.min.mjs";
 
 type ToolId = "merge" | "extract" | "organize" | "rotate" | "optimize" | "number" | "watermark" | "images" | "duplicate" | "delete" | "blank" | "reverse" | "crop" | "sign" | "metadata" | "pdf-excel" | "excel-pdf" | "pdf-powerpoint" | "powerpoint-pdf" | "pdf-word" | "word-pdf";
 type Tool = {

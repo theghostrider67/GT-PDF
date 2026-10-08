@@ -1,0 +1,6 @@
+interface:
+  display_name: "Human Academic Writer"
+  short_description: "Natural, accurate scholarly writing and review"
+  default_prompt: "Use $human-academic-writer to revise this academic text while preserving its meaning, evidence, citations, and author voice."
+policy:
+  allow_implicit_invocation: true

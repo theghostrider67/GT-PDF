@@ -1,0 +1,18 @@
+GT PDF Vercel repair
+
+Apply:
+1. Extract this ZIP into T:\Ghost's Work\ChatGPT\GT PDF, keeping the app and scripts folders. Replace the existing files when prompted.
+2. Commit and push the five changed/added files to the main branch of your GT-PDF GitHub repository.
+3. Vercel will redeploy. vercel.json sets the Next.js framework and the build command to next build --webpack.
+
+The PDF worker is copied from the installed pdfjs-dist dependency into public whenever the Next.js or Vite configuration loads. This avoids Vite-only ?url imports and keeps the worker aligned with the installed PDF.js version. The worker is served from your own website.
+
+Only these files are part of the repair:
+app/gt-pdf-client.tsx
+scripts/prepare-pdf-worker.mjs
+next.config.ts
+vite.config.ts
+vercel.json
+
+The original T: project was not modified because write permission was not granted.
+The Next.js configuration also respects the PowerPoint library browser mappings for its optional Node-only imports.

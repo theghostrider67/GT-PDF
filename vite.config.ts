@@ -1,3 +1,4 @@
+import "./scripts/prepare-pdf-worker.mjs";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
