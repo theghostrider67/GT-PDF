@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, mkdirSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // Serve the worker from our own origin and keep its version aligned with PDF.js.
@@ -23,3 +23,12 @@ for (const format of ["docx", "pptx", "xlsx"]) {
   copyFileSync(new URL(`../node_modules/@silurus/ooxml/dist/${name}`, import.meta.url),
     new URL(`office/${name}`, publicDirectory));
 }
+
+// OCR is served from the same origin, including both language models.
+mkdirSync(new URL("ocr/core/", publicDirectory), { recursive: true });
+mkdirSync(new URL("ocr/lang/", publicDirectory), { recursive: true });
+copyFileSync(new URL("../node_modules/tesseract.js/dist/worker.min.js", import.meta.url), new URL("ocr/worker.min.js", publicDirectory));
+for (const name of readdirSync(new URL("../node_modules/tesseract.js-core/", import.meta.url))) {
+  if (name.endsWith(".wasm") || name.endsWith(".wasm.js")) copyFileSync(new URL(`../node_modules/tesseract.js-core/${name}`, import.meta.url), new URL(`ocr/core/${name}`, publicDirectory));
+}
+for (const language of ["eng", "ben"]) copyFileSync(new URL(`../node_modules/@tesseract.js-data/${language}/4.0.0_best_int/${language}.traineddata.gz`, import.meta.url), new URL(`ocr/lang/${language}.traineddata.gz`, publicDirectory));

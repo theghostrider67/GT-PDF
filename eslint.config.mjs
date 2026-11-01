@@ -15,7 +15,16 @@ const eslintConfig = defineConfig([
     "public/pdf.worker.min.mjs",
     "public/pdfjs/**",
     "public/office/**",
+    "public/ocr/**",
   ]),
+  {
+    files: ["components/pdf/**/*.tsx", "app/gt-pdf-client.tsx"],
+    rules: {
+      // Local document previews use browser-owned data URLs and must never be
+      // routed through a server image optimizer.
+      "@next/next/no-img-element": "off",
+    },
+  },
   {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
     rules: {

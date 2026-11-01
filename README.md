@@ -5,63 +5,59 @@
   <p><strong><a href="https://gt-pdf.vercel.app/">gt-pdf.vercel.app</a></strong></p>
 </div>
 
-**21 free document tools. All in your browser.**
+**38 thoughtful PDF tools. One beautifully simple workspace.**
 
-Convert, combine, and customize your documents without creating an account. GHOST PDF processes your files on your device, so your documents are not uploaded to a conversion server.
+Convert, edit, organize, and protect your documents with a glass-style interface built around clarity. Your documents are processed in your browser, on your own device.
 
 ## Main features
 
-### Convert your documents
-
-| Conversion | What you can do |
+| What you need | Tools ready to help |
 | --- | --- |
-| PDF → Word | Keep the appearance of each page in a DOCX document. |
-| Word → PDF | Turn DOCX pages, including supported pictures and tables, into a PDF. |
-| PDF → PowerPoint | Place each PDF page on its own slide. |
-| PowerPoint → PDF | Convert PPTX slides, pictures, and text into PDF pages. |
-| PDF → Excel | Extract selectable text into worksheet rows and columns. |
-| Excel → PDF | Turn XLSX, XLS, or CSV files into readable PDF pages. |
-| Images → PDF | Combine JPG and PNG images into one PDF in your chosen order. |
+| **Convert documents** | PDF ↔ Word, PowerPoint, and Excel; PDF → JPG/PNG, Markdown, or PDF/A; HTML and images → PDF. |
+| **Organize pages** | Merge, split, extract, duplicate, delete, reverse, and add blank pages. Drag page thumbnails into a new order. |
+| **Edit and personalize** | Add text, pictures, shapes, freehand notes, highlights, page numbers, text/image watermarks, and typed/drawn/uploaded signatures. |
+| **Optimize and recover** | Compress image-heavy PDFs, optimize file structure, repair readable damaged files, and crop pages visually. |
+| **Protect your documents** | AES-256 password protection, password-based unlocking, permanent area redaction, and side-by-side visual comparison. |
+| **Work with forms** | Fill existing fields or draw new text fields, checkboxes, and dropdowns. Keep them interactive or flatten the result. |
+| **Make scans useful** | Capture document photos, clean their appearance, and recognize English or Bengali text with local OCR. |
+| **Read a little faster** | Extract key-sentence digests, use on-device AI summaries where supported, and translate document text with compatible desktop browsers. |
 
-### Organize and edit PDFs
+## A workspace that feels effortless
 
-- **Merge** multiple PDFs into one document.
-- **Extract, reorder, duplicate, or delete** selected pages using page numbers and ranges.
-- **Rotate or reverse** pages, **crop** margins, and **add blank pages**.
-- **Optimize** the PDF's file structure.
-
-### Add finishing touches
-
-- Place **page numbers** in six positions.
-- Add a **text watermark** with adjustable opacity.
-- Add a **typed signature** to the final page.
-- Update the document's **title, author, subject, and keywords**.
-
-### Work privately and in batches
-
-- **Local processing:** your files stay on your device.
-- **No account or daily usage limit:** choose a tool and get started.
-- **Up to 20 files per job:** separate conversions download together as a ZIP.
-- **Choose the order:** arrange PDFs before merging or images before creating a PDF.
+- **Find your tool quickly:** search by task, browse categories, or bookmark your favorites.
+- **See what you are doing:** live page previews, visual annotations, crop selections, form previews, and comparison highlights.
+- **Make it yours:** responsive layouts, light/dark appearance, keyboard search with `⌘ K` or `Ctrl K`, and reduced-motion support.
+- **Do more in one go:** process up to 20 files, download separate conversions as a ZIP, and save finishing workflows on your device.
+- **Keep control:** download results again, inspect text outputs, and choose editable-text or appearance-preserving Office exports.
 
 ## How to use GHOST PDF
 
-1. **Choose a tool** for the conversion or edit you need.
-2. **Drop your files** into the workspace, or select them from your device.
-3. **Adjust the options:** reorder inputs, enter page ranges, choose a rotation, or add your text.
-4. **Run the tool** and download the finished file or batch ZIP.
+1. **Find a tool** using search, categories, or the everyday essentials shortcuts.
+2. **Choose your files** or drop them into the workspace. For scans, use your camera or choose photos. For HTML, you can paste the markup directly.
+3. **Make it just right:** adjust the settings, arrange page thumbnails, draw on the preview, or fill form fields.
+4. **Run the tool** and download your result. Add a finishing workflow if you also want rotation, numbers, a watermark, or compression.
 
-For example, enter `1-3, 6` to extract those pages, or `3, 1, 2` to create a new page order. To combine documents, choose **Merge PDF**, add your PDFs, arrange them, and merge.
+For page ranges, use `1-3, 6`. To split into separate groups, use `1-3; 4-6; 7`. To reorder pages, drag their thumbnails or enter an order such as `3, 1, 2`.
 
-## How it works
+## Privacy, by design
 
-Your browser reads the selected files into temporary memory, processes the conversion or edit locally, and creates the download. Word, Excel, and PowerPoint conversion uses local document rendering rather than sending your files to an external service.
+PDF processing, Office rendering, OCR, and supported AI operations happen locally. Your documents are not sent to a conversion or translation service. Processing engines and OCR language data are served from this website. Compatible browsers may download their own AI models or language packs on first use.
 
-## What to expect from conversions
+Only explicitly saved favorites, recent tool choices, appearance settings, and workflow recipes are stored on your device. Documents and passwords are not saved by GHOST PDF.
 
-- **PDF → Word and PowerPoint:** pages become images to preserve their appearance; the text in those Office outputs is not editable. These files can be converted back to PDF.
-- **Office → PDF:** supported pictures, tables, and styling are rendered into the output. Complex effects or unavailable fonts may look different. Spreadsheet formulas use their saved results.
-- **PDF → Excel:** table extraction is approximate. Original formulas, charts, and formatting cannot be recovered from a PDF. Scanned or image-only PDFs require OCR, which is not included.
+## Choose the right output
+
+- **Word and PowerPoint:** choose page images to preserve appearance, or editable text for a simpler layout. Editable mode does not reproduce original images, fonts, or complex formatting. Scanned text needs OCR first.
+- **Office → PDF:** supported images, tables, styling, and Unicode text are rendered locally. Complex Office effects and unavailable fonts can look different. Spreadsheet formulas use saved results; hidden worksheets are skipped.
+- **Compression, editing, drawn/image signing, redaction, and PDF/A:** these tools can create flattened page images. Read the tool's note before exporting if you need searchable text, links, or interactive forms.
+- **PDF/A:** produces a flattened PDF/A-2b archival copy with an embedded sRGB profile. The export pipeline has been independently checked with veraPDF.
+- **OCR:** English and Bengali recognition run locally. Review recognized text for errors.
+- **PDF → Excel and Markdown:** extraction is approximate. Original spreadsheet formulas, charts, and complex layouts cannot be reconstructed from a PDF.
+- **Summaries:** key-sentence mode works without generative AI. On-device AI mode depends on browser and hardware support and may download a model.
+- **Translation:** requires a compatible desktop Chrome or Edge browser and a supported language pair. It creates translated text in a new layout, rather than reproducing the original pictures and formatting.
+- **HTML:** accepts local files or pasted markup with embedded images. It does not fetch arbitrary website URLs or external resources.
+- **Signatures:** visual signatures are available locally. Certificate signing, remote signature requests, email reminders, and audit-trail services are not included.
+- **Repair:** can rebuild readable structure; missing or destroyed content cannot be recreated.
 
 ## Third-party acknowledgements
 
