@@ -8,7 +8,10 @@ import {
   Table2, Trash2, UploadCloud, X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-const pdfWorkerUrl = "/pdf.worker.min.mjs";
+import { insetCropBox, parsePageSequence, pdfTextRows } from "@/lib/pdf-utils";
+
+const publicBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const pdfWorkerUrl = `${publicBasePath}/pdf.worker.min.mjs`;
 
 type ToolId = "merge" | "extract" | "organize" | "rotate" | "optimize" | "number" | "watermark" | "images" | "duplicate" | "delete" | "blank" | "reverse" | "crop" | "sign" | "metadata" | "pdf-excel" | "excel-pdf" | "pdf-powerpoint" | "powerpoint-pdf" | "pdf-word" | "word-pdf";
 type Tool = {
@@ -24,11 +27,11 @@ type Tool = {
 
 const tools: Tool[] = [
   { id: "pdf-word", name: "PDF to Word", short: "Preserve page layout", description: "Create a page-faithful Word document that keeps the original visual context.", Icon: FileText, color: "word", accept: "application/pdf,.pdf", multiple: false },
-  { id: "word-pdf", name: "Word to PDF", short: "DOCX to PDF pages", description: "Convert Word document text into a clean, shareable PDF.", Icon: FileText, color: "word", accept: ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document", multiple: false },
-  { id: "pdf-powerpoint", name: "PDF to PowerPoint", short: "Pages to editable slides", description: "Place every PDF page onto its own PowerPoint slide.", Icon: Presentation, color: "powerpoint", accept: "application/pdf,.pdf", multiple: false },
-  { id: "powerpoint-pdf", name: "PowerPoint to PDF", short: "Slides to PDF pages", description: "Convert PPTX slide text into a readable PDF deck.", Icon: Presentation, color: "powerpoint", accept: ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation", multiple: false },
+  { id: "word-pdf", name: "Word to PDF", short: "DOCX to PDF pages", description: "Render Word pages, including images and tables, into a PDF.", Icon: FileText, color: "word", accept: ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document", multiple: false },
+  { id: "pdf-powerpoint", name: "PDF to PowerPoint", short: "Pages to slide images", description: "Place every PDF page onto its own PowerPoint slide.", Icon: Presentation, color: "powerpoint", accept: "application/pdf,.pdf", multiple: false },
+  { id: "powerpoint-pdf", name: "PowerPoint to PDF", short: "Slides to PDF pages", description: "Convert slides, pictures, and text into PDF pages.", Icon: Presentation, color: "powerpoint", accept: ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation", multiple: false },
   { id: "pdf-excel", name: "PDF to Excel", short: "Extract pages to sheets", description: "Extract page text into an editable Excel workbook.", Icon: FileSpreadsheet, color: "excel", accept: "application/pdf,.pdf", multiple: false },
-  { id: "excel-pdf", name: "Excel to PDF", short: "Sheets to printable pages", description: "Turn spreadsheet sheets and cell values into a clean PDF.", Icon: Table2, color: "excel", accept: ".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv", multiple: false },
+  { id: "excel-pdf", name: "Excel to PDF", short: "Sheets to printable pages", description: "Convert styled worksheets into PDF pages, including pictures and tables.", Icon: Table2, color: "excel", accept: ".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv", multiple: false },
   { id: "merge", name: "Merge PDF", short: "Combine PDFs", description: "Combine several PDFs in the exact order you choose.", Icon: Files, color: "coral", accept: "application/pdf,.pdf", multiple: true },
   { id: "extract", name: "Extract pages", short: "Keep selected pages", description: "Create a new PDF with only the pages you need.", Icon: Split, color: "blue", accept: "application/pdf,.pdf", multiple: false },
   { id: "organize", name: "Organize PDF", short: "Reorder any pages", description: "Rebuild a document in a custom page order.", Icon: Layers3, color: "violet", accept: "application/pdf,.pdf", multiple: false },
@@ -65,30 +68,6 @@ const downloadBlob = (blob: Blob, filename: string) => {
 };
 const downloadBytes = (bytes: Uint8Array, filename: string, type = "application/pdf") => downloadBlob(new Blob([bytes as BlobPart], { type }), filename);
 
-function parsePageSequence(input: string, total: number, unique = true) {
-  if (!input.trim()) throw new Error("Enter a page range, for example 1-3, 6.");
-  const pages: number[] = [];
-  for (const part of input.split(",").map((value) => value.trim()).filter(Boolean)) {
-    if (/^\d+$/.test(part)) {
-      const page = Number(part);
-      if (page < 1 || page > total) throw new Error(`Page ${page} is outside this ${total}-page PDF.`);
-      pages.push(page - 1);
-      continue;
-    }
-    const match = part.match(/^(\d+)\s*-\s*(\d+)$/);
-    if (!match) throw new Error(`“${part}” is not a valid page range.`);
-    const start = Number(match[1]);
-    const end = Number(match[2]);
-    if (start < 1 || start > total || end < 1 || end > total) throw new Error(`“${part}” is outside pages 1–${total}.`);
-    const step = start <= end ? 1 : -1;
-    for (let page = start; ; page += step) {
-      pages.push(page - 1);
-      if (page === end) break;
-    }
-  }
-  return unique ? [...new Set(pages)] : pages;
-}
-
 function ToolGlyph({ tool }: { tool: Tool }) {
   const officeLetter = tool.id.includes("word") ? "W" : tool.id.includes("powerpoint") ? "P" : tool.id.includes("excel") ? "X" : null;
   if (!officeLetter) return <span className={`tool-icon ${tool.color}`}><tool.Icon /></span>;
@@ -115,8 +94,10 @@ export default function GTPdfClient() {
   const [signature, setSignature] = useState("");
   const [meta, setMeta] = useState({ title: "", author: "", subject: "", keywords: "" });
   const fileInput = useRef<HTMLInputElement>(null);
+  const jobRunning = useRef(false);
 
   const selectTool = useCallback((tool: Tool) => {
+    if (jobRunning.current) throw new Error("Wait for the current conversion to finish before changing tools.");
     setActiveTool(tool);
     setFiles([]);
     setMessage("");
@@ -132,9 +113,9 @@ export default function GTPdfClient() {
     const lifecycle = new AbortController();
     try {
       void Promise.resolve(modelContext.registerTool({
-        name: "choose_tm_pdf_tool",
-        title: "Choose a TM PDF tool",
-        description: "Open one of TM PDF's visible local document tools so the user can add files.",
+        name: "choose_ghost_pdf_tool",
+        title: "Choose a GHOST PDF tool",
+        description: "Open one of GHOST PDF's visible local document tools so the user can add files.",
         inputSchema: { type: "object", properties: { toolId: { type: "string", enum: tools.map((tool) => tool.id) } }, required: ["toolId"], additionalProperties: false },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
         async execute(input) {
@@ -149,6 +130,7 @@ export default function GTPdfClient() {
   }, [selectTool]);
 
   const addFiles = (incoming: File[]) => {
+    if (jobRunning.current) return;
     setError("");
     setMessage("");
     const valid = incoming.filter((file) => {
@@ -178,8 +160,9 @@ export default function GTPdfClient() {
   });
 
   const processFiles = async (selectedFiles = files, nested = false): Promise<void | { output: Uint8Array; filename: string; mime: string }> => {
-    if (!selectedFiles.length) return;
+    if (!selectedFiles.length || (!nested && jobRunning.current)) return;
     if (!nested && selectedFiles.length > 1 && !["merge", "images"].includes(activeTool.id)) {
+      jobRunning.current = true;
       setBusy(true);
       setError("");
       setMessage("");
@@ -190,13 +173,14 @@ export default function GTPdfClient() {
           const result = await processFiles([selectedFiles[index]], true);
           if (result) archive.file(`${String(index + 1).padStart(2, "0")}-${result.filename}`, result.output);
         }
-        const filename = `tm-pdf-${activeTool.id}-batch.zip`;
+        const filename = `ghost-pdf-${activeTool.id}-batch.zip`;
         downloadBlob(await archive.generateAsync({ type: "blob", compression: "DEFLATE" }), filename);
         setMessage(`Done — ${selectedFiles.length} files were converted and downloaded as ${filename}.`);
       } catch (caught) {
         const detail = caught instanceof Error ? caught.message : "The files could not be processed.";
         setError(detail);
       } finally {
+        jobRunning.current = false;
         setBusy(false);
       }
       return;
@@ -206,104 +190,60 @@ export default function GTPdfClient() {
       return;
     }
     if (!nested) {
+      jobRunning.current = true;
       setBusy(true);
       setError("");
       setMessage("");
     }
+    let pdfTask: import("pdfjs-dist/legacy/build/pdf.mjs").PDFDocumentLoadingTask | undefined;
     try {
       const { degrees, PDFDocument, rgb, StandardFonts } = await import("pdf-lib");
-      const printable = (value: unknown) => String(value ?? "").replace(/[^\x20-\x7E\u00A0-\u00FF]/g, "?");
-      const makeTextPdf = async (groups: Array<{ title: string; lines: string[] }>, landscape = false) => {
-        const result = await PDFDocument.create();
-        const regular = await result.embedFont(StandardFonts.Helvetica);
-        const bold = await result.embedFont(StandardFonts.HelveticaBold);
-        const size: [number, number] = landscape ? [841.89, 595.28] : [595.28, 841.89];
-        const margin = 42;
-        const fontSize = 10;
-        const lineHeight = 15;
-        const wrap = (raw: string, maxWidth: number) => {
-          const words = printable(raw).split(/\s+/).filter(Boolean);
-          if (!words.length) return [""];
-          const lines: string[] = [];
-          let current = "";
-          for (const word of words) {
-            const candidate = current ? `${current} ${word}` : word;
-            if (regular.widthOfTextAtSize(candidate, fontSize) <= maxWidth) current = candidate;
-            else {
-              if (current) lines.push(current);
-              current = word.length > 95 ? `${word.slice(0, 92)}...` : word;
-            }
-          }
-          if (current) lines.push(current);
-          return lines;
-        };
-        for (const group of groups) {
-          let page = result.addPage(size);
-          let y = size[1] - margin;
-          if (group.title) {
-            page.drawText(printable(group.title), { x: margin, y, size: 16, font: bold, color: rgb(0.15, 0.12, 0.42) });
-            y -= 28;
-          }
-          for (const raw of group.lines) {
-            const wrapped = wrap(raw, size[0] - margin * 2);
-            for (const line of wrapped) {
-              if (y < margin) {
-                page = result.addPage(size);
-                y = size[1] - margin;
-              }
-              page.drawText(line, { x: margin, y, size: fontSize, font: regular, color: rgb(0.1, 0.11, 0.18) });
-              y -= lineHeight;
-            }
-            y -= 3;
-          }
-        }
-        return result.save({ useObjectStreams: true });
-      };
-      const readPdfPages = async () => {
+      const loadPdf = async () => {
         const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
         pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-        const document = await pdfjs.getDocument({ data: new Uint8Array(await selectedFiles[0].arrayBuffer()) }).promise;
-        const pages: string[][] = [];
-        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-          const page = await document.getPage(pageNumber);
-          const content = await page.getTextContent();
-          const items = content.items.filter((item): item is typeof item & { str: string; transform: number[] } => "str" in item && "transform" in item);
-          const rows = new Map<number, Array<{ x: number; text: string }>>();
-          for (const item of items) {
-            const y = Math.round(item.transform[5] / 3) * 3;
-            const row = rows.get(y) ?? [];
-            row.push({ x: item.transform[4], text: item.str });
-            rows.set(y, row);
-          }
-          const lines = [...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, row]) => row.sort((a, b) => a.x - b.x).map((cell) => cell.text).join(" ").trim()).filter(Boolean);
-          pages.push(lines);
-        }
-        return { document, pages };
+        pdfTask = pdfjs.getDocument({
+          data: new Uint8Array(await selectedFiles[0].arrayBuffer()),
+          cMapUrl: `${publicBasePath}/pdfjs/cmaps/`,
+          standardFontDataUrl: `${publicBasePath}/pdfjs/standard_fonts/`,
+          wasmUrl: `${publicBasePath}/pdfjs/wasm/`,
+          iccUrl: `${publicBasePath}/pdfjs/iccs/`,
+        });
+        return pdfTask.promise;
       };
       let output: Uint8Array;
       let mime = "application/pdf";
       let filename = `${safeBaseName(selectedFiles[0].name)}-${activeTool.id}.pdf`;
       if (activeTool.id === "pdf-excel") {
-        const { pages } = await readPdfPages();
+        const document = await loadPdf();
         const XLSX = await import("xlsx");
         const workbook = XLSX.utils.book_new();
-        pages.forEach((lines, index) => {
-          const sheet = XLSX.utils.aoa_to_sheet(lines.map((line) => line.split(/\s{2,}|\s\|\s/)));
-          XLSX.utils.book_append_sheet(workbook, sheet, `Page ${index + 1}`.slice(0, 31));
-        });
+        let hasText = false;
+        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+          const page = await document.getPage(pageNumber);
+          const content = await page.getTextContent();
+          const items = content.items.filter((item): item is typeof item & { str: string; transform: number[]; width: number; height: number } => "str" in item);
+          const rows = pdfTextRows(items);
+          hasText ||= rows.length > 0;
+          const sheet = XLSX.utils.aoa_to_sheet(rows);
+          XLSX.utils.book_append_sheet(workbook, sheet, `Page ${pageNumber}`);
+          page.cleanup();
+        }
+        if (!hasText) throw new Error("This PDF contains no selectable text. Scanned pages require OCR before Excel conversion.");
         const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: true }) as ArrayBuffer;
         filename = `${safeBaseName(selectedFiles[0].name)}.xlsx`;
         output = new Uint8Array(bytes);
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
       } else if (activeTool.id === "pdf-word") {
-        const { document } = await readPdfPages();
+        const document = await loadPdf();
         const { default: JSZip } = await import("jszip");
         const zip = new JSZip();
         const relationships: string[] = [];
         const body: string[] = [];
+        let finalSection = "";
         for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
           const page = await document.getPage(pageNumber);
-          const viewport = page.getViewport({ scale: 1.65 });
+          const original = page.getViewport({ scale: 1 });
+          const viewport = page.getViewport({ scale: Math.min(2, 2400 / Math.max(original.width, original.height)) });
           const canvas = window.document.createElement("canvas");
           canvas.width = Math.ceil(viewport.width);
           canvas.height = Math.ceil(viewport.height);
@@ -315,31 +255,43 @@ export default function GTPdfClient() {
           const imageData = canvas.toDataURL("image/png").split(",")[1];
           zip.folder("word/media")?.file(mediaName, imageData, { base64: true });
           relationships.push(`<Relationship Id="${relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaName}"/>`);
-          const maxWidth = 5943600;
-          const maxHeight = 8686800;
-          const fit = Math.min(maxWidth / (viewport.width * 12700), maxHeight / (viewport.height * 12700));
-          const width = Math.round(viewport.width * 12700 * fit);
-          const height = Math.round(viewport.height * 12700 * fit);
-          body.push(`<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${width}" cy="${height}"/><wp:docPr id="${pageNumber}" name="PDF page ${pageNumber}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${pageNumber}" name="${mediaName}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${width}" cy="${height}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`);
-          if (pageNumber < document.numPages) body.push(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`);
+          // Word permits a maximum page dimension of 22 inches. Scale only
+          // oversized pages, retaining each page's orientation and aspect ratio.
+          const pageScale = Math.min(1, 1584 / Math.max(original.width, original.height));
+          const pageWidth = Math.round(original.width * pageScale * 20);
+          const pageHeight = Math.round(original.height * pageScale * 20);
+          const width = pageWidth * 635;
+          const height = pageHeight * 635;
+          const section = `<w:sectPr><w:type w:val="nextPage"/><w:pgSz w:w="${pageWidth}" w:h="${pageHeight}"/><w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>`;
+          finalSection = section;
+          const sectionBreak = pageNumber < document.numPages ? section : "";
+          body.push(`<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>${sectionBreak}</w:pPr><w:r><w:rPr><w:sz w:val="2"/></w:rPr><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="0" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="${width}" cy="${height}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/><wp:docPr id="${pageNumber}" name="PDF page ${pageNumber}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${pageNumber}" name="${mediaName}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${width}" cy="${height}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p>`);
+          canvas.width = canvas.height = 0;
+          page.cleanup();
         }
         zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
         zip.folder("_rels")?.file(".rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
         zip.folder("word/_rels")?.file("document.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships.join("")}</Relationships>`);
-        zip.folder("word")?.file("document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body.join("")}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0"/></w:sectPr></w:body></w:document>`);
+        zip.folder("word")?.file("document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body.join("")}${finalSection}</w:body></w:document>`);
         filename = `${safeBaseName(selectedFiles[0].name)}.docx`;
         output = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       } else if (activeTool.id === "pdf-powerpoint") {
-        const { document } = await readPdfPages();
+        const document = await loadPdf();
         const PptxGenJS = (await import("pptxgenjs")).default;
         const presentation = new PptxGenJS();
-        presentation.layout = "LAYOUT_WIDE";
-        presentation.author = "TM PDF";
+        const firstPage = (await document.getPage(1)).getViewport({ scale: 1 });
+        const slideScale = Math.min(1, 4032 / Math.max(firstPage.width, firstPage.height));
+        const slideWidth = firstPage.width * slideScale / 72;
+        const slideHeight = firstPage.height * slideScale / 72;
+        presentation.defineLayout({ name: "PDF_PAGE", width: slideWidth, height: slideHeight });
+        presentation.layout = "PDF_PAGE";
+        presentation.author = "GHOST PDF";
         presentation.subject = `Converted from ${selectedFiles[0].name}`;
         for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
           const page = await document.getPage(pageNumber);
-          const viewport = page.getViewport({ scale: 1.4 });
+          const original = page.getViewport({ scale: 1 });
+          const viewport = page.getViewport({ scale: Math.min(2, 2400 / Math.max(original.width, original.height)) });
           const canvas = window.document.createElement("canvas");
           canvas.width = Math.ceil(viewport.width);
           canvas.height = Math.ceil(viewport.height);
@@ -347,47 +299,21 @@ export default function GTPdfClient() {
           if (!context) throw new Error("This browser could not render the PDF page.");
           await page.render({ canvas, canvasContext: context, viewport }).promise;
           const slide = presentation.addSlide();
-          slide.background = { color: "F7F8FF" };
+          slide.background = { color: "FFFFFF" };
           const pageRatio = viewport.width / viewport.height;
-          const boxRatio = 13.333 / 7.5;
-          const width = pageRatio > boxRatio ? 13.333 : 7.5 * pageRatio;
-          const height = pageRatio > boxRatio ? 13.333 / pageRatio : 7.5;
-          slide.addImage({ data: canvas.toDataURL("image/png"), x: (13.333 - width) / 2, y: (7.5 - height) / 2, w: width, h: height });
+          const boxRatio = slideWidth / slideHeight;
+          const width = pageRatio > boxRatio ? slideWidth : slideHeight * pageRatio;
+          const height = pageRatio > boxRatio ? slideWidth / pageRatio : slideHeight;
+          slide.addImage({ data: canvas.toDataURL("image/png"), x: (slideWidth - width) / 2, y: (slideHeight - height) / 2, w: width, h: height });
+          canvas.width = canvas.height = 0;
+          page.cleanup();
         }
         filename = `${safeBaseName(selectedFiles[0].name)}.pptx`;
         output = await presentation.write({ outputType: "uint8array", compression: true }) as Uint8Array;
         mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-      } else if (activeTool.id === "excel-pdf") {
-        const XLSX = await import("xlsx");
-        const workbook = XLSX.read(await selectedFiles[0].arrayBuffer(), { type: "array" });
-        const groups = workbook.SheetNames.map((sheetName) => {
-          const rows = XLSX.utils.sheet_to_json<(string | number | boolean)[]>(workbook.Sheets[sheetName], { header: 1, defval: "" });
-          return { title: sheetName, lines: rows.map((row) => row.map((cell) => String(cell)).join("  |  ")) };
-        });
-        output = await makeTextPdf(groups, true);
-        filename = `${safeBaseName(selectedFiles[0].name)}.pdf`;
-      } else if (activeTool.id === "word-pdf") {
-        const { default: JSZip } = await import("jszip");
-        const zip = await JSZip.loadAsync(await selectedFiles[0].arrayBuffer());
-        const xml = await zip.file("word/document.xml")?.async("text");
-        if (!xml) throw new Error("This DOCX file does not contain a readable document body.");
-        const document = new DOMParser().parseFromString(xml, "application/xml");
-        const paragraphs = Array.from(document.getElementsByTagName("w:p")).map((paragraph) => Array.from(paragraph.getElementsByTagName("w:t")).map((node) => node.textContent ?? "").join("")).filter(Boolean);
-        output = await makeTextPdf([{ title: safeBaseName(selectedFiles[0].name), lines: paragraphs }]);
-        filename = `${safeBaseName(selectedFiles[0].name)}.pdf`;
-      } else if (activeTool.id === "powerpoint-pdf") {
-        const { default: JSZip } = await import("jszip");
-        const zip = await JSZip.loadAsync(await selectedFiles[0].arrayBuffer());
-        const slideFiles = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]));
-        if (!slideFiles.length) throw new Error("This PPTX file does not contain readable slides.");
-        const groups: Array<{ title: string; lines: string[] }> = [];
-        for (let index = 0; index < slideFiles.length; index += 1) {
-          const xml = await zip.file(slideFiles[index])?.async("text");
-          const document = new DOMParser().parseFromString(xml ?? "", "application/xml");
-          const lines = Array.from(document.getElementsByTagName("a:t")).map((node) => node.textContent?.trim() ?? "").filter(Boolean);
-          groups.push({ title: `Slide ${index + 1}`, lines });
-        }
-        output = await makeTextPdf(groups, true);
+      } else if (["word-pdf", "powerpoint-pdf", "excel-pdf"].includes(activeTool.id)) {
+        const { officeToPdf } = await import("@/lib/office-to-pdf");
+        output = await officeToPdf(selectedFiles[0], activeTool.id as "word-pdf" | "powerpoint-pdf" | "excel-pdf", publicBasePath);
         filename = `${safeBaseName(selectedFiles[0].name)}.pdf`;
       } else if (activeTool.id === "merge") {
         const result = await PDFDocument.create();
@@ -472,9 +398,8 @@ export default function GTPdfClient() {
           output = await source.save({ useObjectStreams: true });
         } else if (activeTool.id === "crop") {
           source.getPages().forEach((page) => {
-            const { width, height } = page.getSize();
-            const margin = Math.min(cropMargin, Math.max(0, Math.min(width, height) / 4));
-            page.setCropBox(margin, margin, width - margin * 2, height - margin * 2);
+            const { x, y, width, height } = insetCropBox(page.getCropBox(), cropMargin);
+            page.setCropBox(x, y, width, height);
           });
           output = await source.save({ useObjectStreams: true });
         } else if (activeTool.id === "sign") {
@@ -505,7 +430,12 @@ export default function GTPdfClient() {
       const detail = caught instanceof Error ? caught.message : "The file could not be processed.";
       setError(detail.toLowerCase().includes("encrypt") ? "This PDF is password-protected. Unlock it before processing." : detail);
     } finally {
-      if (!nested) setBusy(false);
+      // Release the worker even if loading, text extraction, or rendering fails.
+      await pdfTask?.destroy().catch(() => undefined);
+      if (!nested) {
+        jobRunning.current = false;
+        setBusy(false);
+      }
     }
   };
 
@@ -516,7 +446,7 @@ export default function GTPdfClient() {
 
   return <main id="top">
     <header className="site-header">
-      <a className="brand" href="#top" aria-label="TM PDF home"><span className="brand-mark"><FileOutput size={22} /></span><span>TM <b>PDF</b></span></a>
+      <a className="brand" href="#top" aria-label="GHOST PDF home"><span className="brand-mark"><FileOutput size={22} /></span><span>GHOST <b>PDF</b></span></a>
       <nav className={mobileMenu ? "nav-links open" : "nav-links"} aria-label="Main navigation">
         <a href="#tools" onClick={() => setMobileMenu(false)}>All tools</a>
         <a href="#privacy" onClick={() => setMobileMenu(false)}>Privacy</a>
@@ -532,7 +462,7 @@ export default function GTPdfClient() {
         <p>Convert and edit PDF, Word, Excel, and PowerPoint files right in your browser. No account and no daily limit.</p>
         <div className="hero-actions"><a className="primary-button" href="#tools">Explore all tools <ArrowDown /></a><span><b>{tools.length}</b> free tools · unlimited use</span></div>
       </div>
-      <div className="hero-panel" aria-label="TM PDF product summary">
+      <div className="hero-panel" aria-label="GHOST PDF product summary">
         <div className="hero-panel-top"><span className="live-pill"><i /> Ready in your browser</span><Sparkles /></div>
         <div className="floating-docs" aria-hidden="true"><div className="doc-card back"><span /><span /><span /></div><div className="doc-card front"><b>PDF</b><span /><span /><span /></div><div className="spark spark-one">✦</div><div className="spark spark-two">✦</div></div>
         <div className="hero-stats"><div><strong>21</strong><span>free tools</span></div><div><strong>∞</strong><span>uses per day</span></div><div><strong>0</strong><span>files stored</span></div></div>
@@ -541,7 +471,7 @@ export default function GTPdfClient() {
 
     <section className="tools-section" id="tools">
       <div className="section-heading"><div><span className="kicker">All tools. No limits.</span><h2>What do you need to do?</h2></div><div className="legend"><span><i className="free-dot" /> 21 free tools</span><span><Sparkles /> Unlimited times</span></div></div>
-      <div className="tool-grid">{tools.map((tool, index) => <button key={tool.id} className={`tool-card ${activeTool.id === tool.id ? "active" : ""}`} onClick={() => selectTool(tool)}>
+      <div className="tool-grid">{tools.map((tool, index) => <button key={tool.id} className={`tool-card ${activeTool.id === tool.id ? "active" : ""}`} onClick={() => selectTool(tool)} disabled={busy}>
         <ToolGlyph tool={tool} />
         <span className="tool-card-copy"><span className="tool-title"><strong>{tool.name}</strong></span><small>{tool.short}</small></span>
         <span className="tool-index">{String(index + 1).padStart(2, "0")}</span>
@@ -551,7 +481,7 @@ export default function GTPdfClient() {
     <section className="workspace-wrap" id="workspace"><div className="workspace-shell">
       <div className="workspace-heading"><ToolGlyph tool={activeTool} /><div><span className="kicker">Free · unlimited</span><h2>{activeTool.name}</h2><p>{activeTool.description}</p></div></div>
       <div className="workspace-card">
-        <>
+        <fieldset className="processing-fields" disabled={busy}>
           <div className={dragging ? "dropzone dragging" : "dropzone"} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles([...event.dataTransfer.files]); }}>
             <input ref={fileInput} type="file" accept={activeTool.accept} multiple hidden onChange={(event) => { addFiles([...(event.target.files ?? [])]); event.currentTarget.value = ""; }} />
             <span className="upload-icon"><UploadCloud /></span><h3>Drop {inputNoun} here</h3><p>or choose them from your device</p><button className="secondary-button" onClick={() => fileInput.current?.click()}><Plus /> Choose files</button><small><LockKeyhole /> Up to 20 files · processed locally · no usage limit</small>
@@ -566,17 +496,19 @@ export default function GTPdfClient() {
             {activeTool.id === "crop" && <label className="option-field"><span>Crop margin: {cropMargin} pt</span><input type="range" min="0" max="72" step="2" value={cropMargin} onChange={(event) => setCropMargin(Number(event.target.value))} /><small>Applied evenly to all four sides.</small></label>}
             {activeTool.id === "sign" && <label className="option-field"><span>Signature name</span><input value={signature} maxLength={60} onChange={(event) => setSignature(event.target.value)} placeholder="Type your name" /><small>Placed at the bottom-right of the final page.</small></label>}
             {activeTool.id === "metadata" && <div className="metadata-grid"><label className="option-field"><span>Document title</span><input value={meta.title} onChange={(event) => setMeta({ ...meta, title: event.target.value })} /></label><label className="option-field"><span>Author</span><input value={meta.author} onChange={(event) => setMeta({ ...meta, author: event.target.value })} /></label><label className="option-field"><span>Subject</span><input value={meta.subject} onChange={(event) => setMeta({ ...meta, subject: event.target.value })} /></label><label className="option-field"><span>Keywords</span><input value={meta.keywords} onChange={(event) => setMeta({ ...meta, keywords: event.target.value })} placeholder="invoice, final, 2026" /></label></div>}
-            {activeTool.id === "optimize" && <p className="inline-note"><Gauge /> TM PDF will rebuild the file using compact object streams. Results vary depending on the source PDF.</p>}
+            {["word-pdf", "powerpoint-pdf", "excel-pdf"].includes(activeTool.id) && <p className="inline-note">Images, text, and supported layout are rendered locally. Complex Office effects and unavailable fonts may look different.</p>}
+            {["pdf-word", "pdf-powerpoint"].includes(activeTool.id) && <p className="inline-note">Each PDF page becomes an image. The original appearance is preserved; its text is not editable in the output.</p>}
+            {activeTool.id === "optimize" && <p className="inline-note"><Gauge /> GHOST PDF will rebuild the file using compact object streams. Results vary depending on the source PDF.</p>}
             {error && <p className="feedback error" role="alert">{error}</p>}{message && <p className="feedback success" role="status"><Check /> {message}</p>}
             <button className="process-button" onClick={() => void processFiles()} disabled={busy}>{busy ? <><span className="spinner" /> Processing on your device…</> : <><activeTool.Icon /> {activeTool.name} <Download /></>}</button>
           </div>}
           {!files.length && error && <p className="feedback error standalone" role="alert">{error}</p>}
-        </>
+        </fieldset>
       </div>
     </div></section>
 
-    <section className="trust-section" id="privacy"><div className="trust-copy"><span className="eyebrow"><ShieldCheck /> Privacy built in</span><h2>Your document stays yours.</h2><p>TM PDF processes files in browser memory. Your documents are not uploaded, stored, or inspected by us.</p></div><div className="trust-steps"><div><span>01</span><strong>Choose locally</strong><p>Your browser reads the file from your device.</p></div><div><span>02</span><strong>Process privately</strong><p>The change happens in temporary browser memory.</p></div><div><span>03</span><strong>Download directly</strong><p>The finished PDF returns straight to you.</p></div></div></section>
+    <section className="trust-section" id="privacy"><div className="trust-copy"><span className="eyebrow"><ShieldCheck /> Privacy built in</span><h2>Your document stays yours.</h2><p>GHOST PDF processes files in browser memory. Your documents are not uploaded, stored, or inspected by us.</p></div><div className="trust-steps"><div><span>01</span><strong>Choose locally</strong><p>Your browser reads the file from your device.</p></div><div><span>02</span><strong>Process privately</strong><p>The change happens in temporary browser memory.</p></div><div><span>03</span><strong>Download directly</strong><p>The finished PDF returns straight to you.</p></div></div></section>
 
-    <footer><a className="brand" href="#top"><span className="brand-mark"><FileOutput /></span><span>TM <b>PDF</b></span></a><p>Twenty-one private document tools, free and unlimited.</p><div><a href="#tools">Tools</a><a href="#privacy">Privacy</a></div><small>© {new Date().getFullYear()} TM PDF. Files are processed locally in your browser.</small></footer>
+    <footer><a className="brand" href="#top"><span className="brand-mark"><FileOutput /></span><span>GHOST <b>PDF</b></span></a><p>Twenty-one private document tools, free and unlimited.</p><div><a href="#tools">Tools</a><a href="#privacy">Privacy</a></div><small>© {new Date().getFullYear()} GHOST PDF. Files are processed locally in your browser.</small></footer>
   </main>;
 }

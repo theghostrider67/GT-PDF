@@ -1,54 +1,66 @@
-# PDF Harbor
+# GHOST PDF
 
-A privacy-first PDF web product. The current release performs all document work in the visitor's browser; selected files are not uploaded to an application server.
+Twenty-one document tools that process files locally in the browser. Selected documents are not uploaded to an application server.
 
-## Working tools
+## Tools
 
-- Merge PDFs and reorder inputs
-- Extract selected pages with page/range syntax
-- Rotate all pages
-- Add page numbers in six positions
-- Add a text watermark with adjustable opacity
-- Convert ordered JPG/PNG images into a PDF
+- Merge, extract, organize, rotate, optimize, duplicate, delete, reverse, and crop PDF pages
+- Add page numbers, watermarks, a typed signature, blank pages, and document metadata
+- Convert JPG/PNG images to PDF
+- Convert between PDF and Word, Excel, and PowerPoint
+- Process up to 20 files per job; separate conversions download together as a ZIP
+
+### Conversion limits
+
+PDF-to-Word and PDF-to-PowerPoint preserve the page appearance as images, so the text in those Office outputs is not editable. Word output retains the size and orientation of each page (scaled only if it exceeds Word's 22-inch page limit). PowerPoint uses the first page's aspect ratio; differently sized pages fit inside the shared slide size.
+
+Word, Excel, and PowerPoint inputs are rendered locally with `@silurus/ooxml`, including supported pictures, tables, styling, and Unicode text. PDF output contains page images plus an invisible text layer for supported Latin characters. Pictures from a PDF-to-Office export can be converted back to PDF without OCR. Complex Office effects, unsupported objects, and unavailable fonts may render differently from Microsoft Office. Spreadsheet formulas use their saved cached results; they are not recalculated. Hidden sheets are skipped; large sheets are tiled into multiple pages.
+
+PDF-to-Excel extracts selectable text and estimates columns from text positions. It does not reconstruct original spreadsheet formulas, charts, or styles. Scanned pages and image-only PDFs require OCR, which is not included.
 
 ## Local development
 
-Requirements: Node.js 22 or newer.
+Requires Node.js **22.13 or newer**.
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-The local site runs at `http://localhost:5173`.
+Open `http://localhost:5173`. PDF.js workers, fonts, CMaps, image decoders, and color profiles are copied from the installed dependency into `public/` when a build or dev configuration loads. The Office parser WASM files are prepared in `public/office/` as well. All processing engines are served locally, without a third-party CDN or conversion service.
 
 ## Validation
 
 ```bash
+npm run test:regressions
 npm run test:pdf
+npm run test:office
+npm run lint
+npx tsc --noEmit
 npm run build
-npm audit --omit=dev
 ```
 
-## Deploy to Netlify
+For the browser conversion tests (all six conversion directions, round trips, edited outputs, slide order, wide/long spreadsheets, XLS/CSV, branding, and deployed CSP):
 
-The included `netlify.toml` configures the deployment automatically:
+```bash
+npm run build:static
+npx playwright install chromium
+npm run test:conversions
+```
 
-- Build command: `npm run build`
-- Publish directory: `dist/client`
-- Node version: `22`
+To use an existing Chrome executable instead, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its full path. The tests start and stop their own local server, use generated documents, and delete their temporary files afterward.
 
-Connect this directory's Git repository in Netlify and publish. The output is static, so PDF files remain in the visitor's browser and do not pass through Netlify Functions.
+The regression tests cover invalid page selections, page order, existing crop origins, PDF text columns, long text wrapping, alternate XML prefixes, PowerPoint paragraph runs, and saved presentation order.
 
-## Before charging customers
+## Build and deployment
 
-1. Confirm a final product name, domain, and trademark availability.
-2. Replace the beta pricing copy with real entitlements and add a payment provider such as Stripe.
-3. Add authentication and a small backend for subscription status; keep PDF processing client-side where possible.
-4. Publish operator-specific Terms, Privacy, Refund, and Acceptable Use policies and obtain local legal/tax advice.
-5. Add privacy-respecting analytics, error monitoring, customer support, and automated end-to-end tests.
-6. Upgrade the hosting plan before meaningful production traffic and configure usage alerts.
+- **Vercel:** `vercel.json` uses `next build --webpack`. Run `npm run build:next` to check this build locally.
+- **Netlify:** `netlify.toml` uses `npm run build:static` and publishes `out/`.
+- **GitHub Pages:** the included workflow runs tests and exports `out/`, using the base path supplied by the Pages action. Enable GitHub Actions as the Pages publishing source in repository settings.
+- **Vinext/Cloudflare:** `npm run build` produces the existing server/client build in `dist/`; it requires a server runtime. `npm start` starts the configured local Wrangler runtime.
+
+For another host serving a subdirectory, set `NEXT_PUBLIC_BASE_PATH` at build time (for example, `/GT-PDF`) before running `npm run build:static`. This also prefixes the PDF worker and resource URLs.
 
 ## Licensing
 
-Application code can be commercialized by its owner. The PDF engine is `pdf-lib`, licensed under MIT. Its required notice is published at `/third-party-notices.txt` and retained in the repository.
+The PDF engine is `pdf-lib`, licensed under MIT. Its notice is published at `/third-party-notices.txt` and retained in the repository.

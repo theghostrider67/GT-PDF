@@ -44,3 +44,7 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+/public/pdf.worker.min.mjs
+/public/pdfjs/
+
+/public/office/
