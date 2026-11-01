@@ -123,6 +123,14 @@ try {
   await page.waitForFunction((unavailable) => document.querySelector(".process-button").disabled === unavailable, translationUnavailable);
   assert.equal(await page.locator(".process-button").isDisabled(), translationUnavailable);
   if (!translationUnavailable) console.log("INFO native translation available; browser-managed language download requires a real language pack for end-to-end verification");
+  const stalledBrowser = await context.newPage();
+  await stalledBrowser.addInitScript(() => { Object.defineProperty(globalThis, "Translator", { configurable: true, value: { availability: () => new Promise(() => {}) } }); });
+  await stalledBrowser.goto(page.url(), { waitUntil: "networkidle" });
+  await stalledBrowser.locator(".tool-card").filter({ has: stalledBrowser.getByText("Translate PDF", { exact: true }) }).click();
+  await stalledBrowser.locator('input[type="file"][hidden]').first().setInputFiles(sourcePath);
+  await stalledBrowser.getByText(/Private translation is unavailable/).waitFor({ state: "visible", timeout: 15000 });
+  assert(await stalledBrowser.locator(".process-button").isDisabled());
+  await stalledBrowser.close(); console.log("PASS stalled browser translation capability falls back without hanging the workspace");
   await page.setViewportSize({ width: 390, height: 844 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false); await page.getByRole("button", { name: "Toggle navigation" }).click(); assert.equal(await page.getByRole("button", { name: "Toggle navigation" }).getAttribute("aria-expanded"), "true");
   assert.deepEqual(errors, []); console.log("PASS visual editor, irreversible redaction, forms, visual crop, OCR, translation capability messaging, and mobile navigation");
 } catch (error) {

@@ -119,10 +119,22 @@ export default function GTPdfClient() {
   }, []);
   useEffect(() => {
     let active = true;
-    const translator = (globalThis as BrowserIntelligence).Translator;
-    if (!translator || options.sourceLanguage === options.targetLanguage) { void Promise.resolve().then(() => { if (active) setTranslationSupport("unavailable"); }); }
-    else void translator.availability({ sourceLanguage: options.sourceLanguage, targetLanguage: options.targetLanguage }).then((value) => { if (active) setTranslationSupport(value === "unavailable" ? "unavailable" : value); }).catch(() => { if (active) setTranslationSupport("unavailable"); });
-    return () => { active = false; };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Some Chromium builds expose the API but never settle availability().
+    // Keep the action disabled until support is known, with a bounded fallback.
+    void Promise.resolve().then(async () => {
+      if (!active) return "unavailable";
+      setTranslationSupport("checking");
+      const translator = (globalThis as BrowserIntelligence).Translator;
+      if (!translator || options.sourceLanguage === options.targetLanguage) return "unavailable";
+      return Promise.race([
+        translator.availability({ sourceLanguage: options.sourceLanguage, targetLanguage: options.targetLanguage }),
+        new Promise<string>((resolve) => { timer = setTimeout(() => resolve("unavailable"), 8000); }),
+      ]);
+    }).then((value) => { if (active) setTranslationSupport(value === "unavailable" ? "unavailable" : value); })
+      .catch(() => { if (active) setTranslationSupport("unavailable"); })
+      .finally(() => clearTimeout(timer));
+    return () => { active = false; clearTimeout(timer); };
   }, [options.sourceLanguage, options.targetLanguage]);
   useEffect(() => {
     if (activeTool.id !== "forms" || !files[0]) return;
