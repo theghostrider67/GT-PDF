@@ -26,7 +26,7 @@ export default function GTPdfClient() {
       if (new URLSearchParams(window.location.search).get("search") === "1") searchInput.current?.focus();
       try {
         const saved = JSON.parse(localStorage.getItem("ghost-pdf-favorites") || "[]");
-        if (Array.isArray(saved)) setFavorites(saved.filter((id): id is ToolId => tools.some((tool) => tool.id === id)));
+        if (Array.isArray(saved)) setFavorites([...new Set(saved.slice(0, 100).filter((id): id is ToolId => tools.some((tool) => tool.id === id)))]);
       } catch { /* Saved tools are optional. */ }
     });
     return () => cancelAnimationFrame(frame);

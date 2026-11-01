@@ -45,6 +45,8 @@ For page ranges, use `1-3, 6`. To split into separate groups, use `1-3; 4-6; 7`.
 
 PDF processing, Office rendering, OCR, and supported AI operations happen locally. Your documents are not sent to a conversion or translation service. Processing engines and OCR language data are served from this website. Compatible browsers may download their own AI models or language packs on first use.
 
+Files are checked against browser safety limits before conversion: up to **50 MB per file**, **150 MB per selection**, and **500 input PDF pages**. Office archives are checked for excessive expansion, corrupted entries, XML entity declarations, macros, and external resource links. HTML conversion uses restricted formatting and embedded JPG/PNG images.
+
 Only explicitly saved favorites, recent tool choices, appearance settings, and workflow recipes are stored on your device. Documents and passwords are not saved by GHOST PDF.
 
 ## Choose the right output
@@ -60,6 +62,10 @@ Only explicitly saved favorites, recent tool choices, appearance settings, and w
 - **HTML:** accepts local files or pasted markup with embedded images. It does not fetch arbitrary website URLs or external resources.
 - **Signatures:** visual signatures are available locally. Certificate signing, remote signature requests, email reminders, and audit-trail services are not included.
 - **Repair:** can rebuild readable structure; missing or destroyed content cannot be recreated.
+
+## Security
+
+The production website is published as static files with security headers and a strict script policy. Conversion runs locally; no document-upload API or conversion server is exposed. See [SECURITY.md](SECURITY.md) for the threat model, supported limits, and testing scope.
 
 ## Third-party acknowledgements
 

@@ -6,9 +6,10 @@ import { parsePageSequence } from "@/lib/pdf-utils";
 export function PageOrganizer({ file, sequence, onChange, basePath, disabled }: { file: File; sequence: string; onChange: (value: string) => void; basePath: string; disabled: boolean }) {
   const [pages, setPages] = useState<string[]>([]); const [count, setCount] = useState(0); const [dragged, setDragged] = useState<number | null>(null);
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
     void (async () => {
-      const opened = await openLocalPdf(file, basePath);
+      const opened = await openLocalPdf(file, basePath, "", controller.signal);
       try {
         const total = opened.document.numPages;
         if (!cancelled) { setCount(total); onChange(Array.from({ length: total }, (_, i) => i + 1).join(", ")); }
@@ -17,7 +18,7 @@ export function PageOrganizer({ file, sequence, onChange, basePath, disabled }: 
         if (!cancelled) setPages(previews);
       } finally { await opened.close(); }
     })().catch(() => undefined);
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [file, basePath, onChange]);
   let order: number[] = []; try { order = count && sequence ? parsePageSequence(sequence, count, false) : []; } catch { /* Keep the editable range available while it is incomplete. */ }
   const visible = [...new Set([...order.filter((index) => index < pages.length), ...pages.map((_, index) => index)])];

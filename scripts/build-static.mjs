@@ -10,3 +10,7 @@ const result = spawnSync(process.execPath, [
 });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;
+if (result.status === 0) {
+  const { hardenStaticExport } = await import("./harden-static-export.mjs");
+  await hardenStaticExport(fileURLToPath(new URL("../out/", import.meta.url)));
+}

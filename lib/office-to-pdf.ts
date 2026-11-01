@@ -1,3 +1,4 @@
+import { assertPageCount, assertPageGeometry, validateInputFile } from "./file-safety";
 import { PDFDocument, StandardFonts, type PDFPage, type PDFFont } from "pdf-lib";
 import type { Worksheet } from "@silurus/ooxml/xlsx";
 
@@ -58,6 +59,7 @@ function sheetBounds(sheet: Worksheet) {
 }
 
 export async function officeToPdf(file: File, kind: OfficeKind, basePath = ""): Promise<Uint8Array> {
+  await validateInputFile(file, kind);
   const pdf = await PDFDocument.create();
   pdf.setCreator("GHOST PDF");
   pdf.setProducer("GHOST PDF");
@@ -71,8 +73,10 @@ export async function officeToPdf(file: File, kind: OfficeKind, basePath = ""): 
       const doc = await DocxDocument.load(data, { ...common, wasmUrl: `${basePath}/office/docx_parser_bg.wasm` });
       try {
         await doc.waitUntilLayoutComplete();
+        assertPageCount(doc.pageCount);
         for (let index = 0; index < doc.pageCount; index++) {
           const { widthPt, heightPt } = doc.pageSize(index);
+          assertPageGeometry(widthPt, heightPt);
           const width = Math.min(1800, widthPt * 2);
           const runs: TextRun[] = [];
           await doc.renderPage(canvas, index, { width, dpr: 1,
@@ -85,6 +89,7 @@ export async function officeToPdf(file: File, kind: OfficeKind, basePath = ""): 
       const deck = await PptxPresentation.load(data, { ...common, wasmUrl: `${basePath}/office/pptx_parser_bg.wasm` });
       try {
         await deck.waitUntilLayoutComplete();
+        assertPageCount(deck.slideCount); assertPageGeometry(deck.slideWidth / 12700, deck.slideHeight / 12700);
         for (let index = 0; index < deck.slideCount; index++) {
           const runs: TextRun[] = [];
           await deck.renderSlide(canvas, index, { width: Math.min(1800, deck.slideWidth / 9525 * 2), dpr: 1, skipMediaControls: true,
@@ -102,10 +107,14 @@ export async function officeToPdf(file: File, kind: OfficeKind, basePath = ""): 
       }
       const book = await XlsxWorkbook.load(input, { ...common, wasmUrl: `${basePath}/office/xlsx_parser_bg.wasm` });
       try {
+        assertPageCount(book.sheetCount, 100);
+        let printedPages = 0;
         for (let index = 0; index < book.sheetCount; index++) {
           if (book.isHidden(index)) continue;
           const sheet = await book.getWorksheet(index);
           const { lastRow, lastCol } = sheetBounds(sheet);
+          const count = Math.ceil(lastRow / 32) * Math.ceil(lastCol / 8);
+          assertPageCount(count); printedPages += count; assertPageCount(printedPages);
           // Tile both axes to include sheets that are wider or longer than one page.
           for (let row = 1; row <= lastRow; row += 32) {
             for (let col = 1; col <= lastCol; col += 8) {

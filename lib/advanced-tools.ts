@@ -1,3 +1,5 @@
+import { assertBatchSize, assertPageCount, validateInputFile, FILE_LIMITS } from "./file-safety";
+import { sanitizeDocumentHtml } from "./html-safety";
 import { PDFDocument, StandardFonts, rgb, degrees, PDFCheckBox, PDFDropdown, PDFOptionList, PDFRadioGroup, PDFTextField } from "pdf-lib";
 import { canvasBytes, openLocalPdf, readDocumentText, renderLocalPage } from "./pdf-render";
 import { parsePageSequence, pdfTextRows } from "./pdf-utils";
@@ -42,14 +44,14 @@ export async function textPagesPdf(pages: string[], title: string) {
   const pdf = await PDFDocument.create(); pdf.setCreator("GHOST PDF"); pdf.setTitle(title);
   const canvas = document.createElement("canvas"); canvas.width = 1190; canvas.height = 1684;
   const context = canvas.getContext("2d"); if (!context) throw new Error("This browser cannot render document text.");
-  const finish = async () => { const image = await pdf.embedPng(await canvasBytes(canvas)); pdf.addPage([595, 842]).drawImage(image, { x: 0, y: 0, width: 595, height: 842 }); };
+  const finish = async () => { assertPageCount(pdf.getPageCount() + 1, FILE_LIMITS.outputPages); const image = await pdf.embedPng(await canvasBytes(canvas)); pdf.addPage([595, 842]).drawImage(image, { x: 0, y: 0, width: 595, height: 842 }); };
   const reset = () => { context.fillStyle = "white"; context.fillRect(0, 0, canvas.width, canvas.height); context.fillStyle = "#172033"; context.font = "25px Arial, sans-serif"; context.textBaseline = "top"; };
   for (const text of pages) {
     reset(); let y = 90;
     for (const paragraph of text.split("\n")) {
       let line = "";
       for (const token of Array.from(paragraph)) {
-        if (context.measureText(line + token).width > 1010) { context.fillText(line, 90, y); y += 39; line = ""; }
+        if (line.length >= 500 || context.measureText(line + token).width > 1010) { context.fillText(line, 90, y); y += 39; line = ""; }
         if (y > 1550) { await finish(); reset(); y = 90; }
         line += token;
       }
@@ -63,39 +65,44 @@ export async function textPagesPdf(pages: string[], title: string) {
 }
 
 async function htmlPdf(source: string) {
-  const { default: DOMPurify } = await import("dompurify");
   const { toCanvas } = await import("html-to-image");
-  const safe = DOMPurify.sanitize(source, { WHOLE_DOCUMENT: false, FORBID_TAGS: ["iframe", "form", "input", "button", "video", "audio", "link", "meta", "base", "object", "embed"] });
-  const parsed = new DOMParser().parseFromString(safe, "text/html");
-  parsed.querySelectorAll("img").forEach((image) => { if (!image.src.startsWith("data:image/")) image.remove(); });
-  parsed.querySelectorAll("a").forEach((link) => link.removeAttribute("href"));
+  const safe = await sanitizeDocumentHtml(source);
   const frame = document.createElement("iframe"); frame.setAttribute("sandbox", "allow-same-origin");
   frame.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;";
-  const loaded = new Promise<void>((resolve) => { frame.onload = () => resolve(); });
-  frame.srcdoc = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;"><style>html,body{margin:0;padding:0;background:white;color:#172033;font:16px Arial,sans-serif}#content{padding:48px;box-sizing:border-box;width:794px;overflow-wrap:anywhere}img{max-width:100%}table{border-collapse:collapse}td,th{padding:8px;border:1px solid #ddd}</style></head><body><div id="viewport" style="height:1123px;overflow:hidden"><div id="content">${parsed.body.innerHTML}</div></div></body></html>`;
+  let loadingTimer: ReturnType<typeof setTimeout>;
+  const loaded = new Promise<void>((resolve, reject) => {
+    loadingTimer = setTimeout(() => reject(new Error("The HTML preview timed out. Simplify the document and try again.")), 10000);
+    frame.onload = () => { clearTimeout(loadingTimer); resolve(); };
+    frame.onerror = () => { clearTimeout(loadingTimer); reject(new Error("The HTML preview could not be loaded.")); };
+  });
+  frame.srcdoc = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-src 'none';"><style>html,body{margin:0;padding:0;background:white;color:#172033;font:16px Arial,sans-serif}#content{padding:48px;box-sizing:border-box;width:794px;overflow-wrap:anywhere}img{max-width:100%}table{border-collapse:collapse}td,th{padding:8px;border:1px solid #ddd}</style></head><body><div id="viewport" style="height:1123px;overflow:hidden"><div id="content">${safe}</div></div></body></html>`;
   document.body.appendChild(frame);
   try {
     await loaded; const doc = frame.contentDocument!; await doc.fonts.ready;
     await Promise.all(Array.from(doc.images).map((image) => image.decode().catch(() => undefined)));
     const viewport = doc.getElementById("viewport")!; const content = doc.getElementById("content")!;
-    const height = Math.max(1, content.scrollHeight); const pdf = await PDFDocument.create();
+    const height = Math.max(1, content.scrollHeight);
+    if (height > 1123 * FILE_LIMITS.htmlPages) throw new Error("This HTML exceeds the 100-page safety limit.");
+    const pdf = await PDFDocument.create();
     for (let top = 0; top < height; top += 1123) {
       content.style.transform = `translateY(-${top}px)`;
       const canvas = await toCanvas(viewport, { width: 794, height: 1123, pixelRatio: 1.5, backgroundColor: "white", fontEmbedCSS: "" });
       const image = await pdf.embedPng(await canvasBytes(canvas)); pdf.addPage([595.28, 841.89]).drawImage(image, { x: 0, y: 0, width: 595.28, height: 841.89 }); canvas.width = canvas.height = 0;
     }
     return pdf.save();
-  } finally { frame.remove(); }
+  } finally { clearTimeout(loadingTimer!); frame.remove(); }
 }
 
 export async function runAdvancedTool(id: ToolId, files: File[], options: AdvancedOptions, progress: (text: string) => void, base = "", sessions?: { translator?: Promise<LocalTranslator>; summarizer?: Promise<LocalSummarizer> }): Promise<ToolResult> {
+  assertBatchSize(files); for (const input of files) await validateInputFile(input, id);
   const file = files[0]; const name = baseName(file?.name || "document");
   const pdfResult = (output: Uint8Array, suffix: string = id, detail?: string): ToolResult => ({ output, filename: `${name}-${suffix}.pdf`, mime: "application/pdf", detail });
   if (id === "protect" || id === "unlock" || id === "repair") {
     const { PDF } = await import("@libpdf/core");
-    if (id === "protect" && options.newPassword.length < 6) throw new Error("Choose a password with at least 6 characters.");
+    if (id === "protect" && (options.newPassword.length < 8 || options.newPassword.length > 1024)) throw new Error("Choose a password with 8–1,024 characters.");
     const doc = await PDF.load(new Uint8Array(await file.arrayBuffer()), { credentials: options.password || undefined, lenient: id === "repair" });
     if (doc.isEncrypted && !doc.isAuthenticated) throw new Error("Enter the correct document password.");
+    assertPageCount(doc.getPageCount());
     if (!doc.getPageCount()) throw new Error("No readable pages could be recovered from this file.");
     if (id === "protect") doc.setProtection({ userPassword: options.newPassword, ownerPassword: options.newPassword, algorithm: "AES-256" });
     if (id === "unlock") doc.removeProtection({ ignorePermissions: true });
@@ -125,13 +132,14 @@ export async function runAdvancedTool(id: ToolId, files: File[], options: Advanc
     return pdfResult(await pdf.save());
   }
   if (id === "split") {
-    const source = await PDFDocument.load(await file.arrayBuffer()); const { default: JSZip } = await import("jszip"); const zip = new JSZip();
+    const source = await PDFDocument.load(await file.arrayBuffer()); assertPageCount(source.getPageCount()); const { default: JSZip } = await import("jszip"); const zip = new JSZip();
     const groups = options.splitMode === "groups" ? options.pageRange.split(";").map((range) => parsePageSequence(range, source.getPageCount(), false)) : source.getPageIndices().map((index) => [index]);
+    assertPageCount(groups.reduce((n, group) => n + group.length, 0), FILE_LIMITS.outputPages);
     for (let n = 0; n < groups.length; n++) { const doc = await PDFDocument.create(); (await doc.copyPages(source, groups[n])).forEach((page) => doc.addPage(page)); zip.file(`${name}-${String(n + 1).padStart(3, "0")}.pdf`, await doc.save()); }
     return { output: await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" }), filename: `${name}-split.zip`, mime: "application/zip", detail: `${groups.length} separate PDFs.` };
   }
   if (id === "forms") {
-    const pdf = await PDFDocument.load(await file.arrayBuffer()); const form = pdf.getForm();
+    const pdf = await PDFDocument.load(await file.arrayBuffer()); assertPageCount(pdf.getPageCount()); const form = pdf.getForm();
     for (const value of options.formValues) {
       const field = form.getField(value.name);
       if (field instanceof PDFTextField) field.setText(String(value.value));

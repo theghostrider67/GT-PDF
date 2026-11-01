@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { ChevronLeft, ChevronRight, Highlighter, ImagePlus, MousePointer2, Pencil, Square, Trash2, Type, Undo2, CheckSquare, List, ScanLine } from "lucide-react";
+import { validateImageFile } from "@/lib/file-safety";
 import { openLocalPdf, renderLocalPage } from "@/lib/pdf-render";
 import type { Mark, MarkKind, FormValue } from "@/lib/studio-types";
 import type { ToolId } from "@/lib/tools";
@@ -24,13 +25,14 @@ export function DocumentStudio({ file, tool, marks, setMarks, disabled, basePath
   const imageInput = useRef<HTMLInputElement>(null);
   const drag = useRef<{ start: { x: number; y: number }; mark?: Mark; moving?: Mark; points: Array<{ x: number; y: number }> } | null>(null);
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false; let close: (() => Promise<void>) | undefined;
-    void openLocalPdf(file, basePath).then((opened) => {
+    void openLocalPdf(file, basePath, "", controller.signal).then((opened) => {
       close = opened.close;
       if (cancelled) { void close(); return; }
       setPdf(opened.document); setPageIndex(tool === "sign" ? opened.document.numPages - 1 : 0);
     }).catch((caught) => { if (!cancelled) { setError(caught instanceof Error ? caught.message : "Could not preview this PDF."); setLoading(false); } });
-    return () => { cancelled = true; void close?.(); };
+    return () => { cancelled = true; controller.abort(); void close?.(); };
   }, [file, basePath, tool]);
   useEffect(() => {
     if (!pdf) return;
@@ -127,9 +129,9 @@ export function DocumentStudio({ file, tool, marks, setMarks, disabled, basePath
       {tool === "forms" && ([['text-field',Type,'Text field'],['checkbox',CheckSquare,'Checkbox'],['dropdown',List,'Dropdown']] as const).map(([id,Icon,label]) => <button type="button" key={id} className={mode === id ? "selected" : ""} aria-label={label} title={label} disabled={disabled} onClick={() => setMode(id)}><Icon/></button>)}
       <span className="toolbar-spacer"/><button type="button" aria-label="Undo annotation" title="Undo last mark" disabled={disabled || !marks.length} onClick={() => setMarks((current) => current.slice(0, -1))}><Undo2/></button><button type="button" aria-label="Delete selected annotation" title="Delete selected" disabled={disabled || !selected} onClick={() => { setMarks((current) => current.filter((mark) => mark.id !== selected)); setSelected(null); }}><Trash2/></button>
     </div>}
-    {tool === "edit" && <div className="studio-inspector"><label><span>Text</span><input aria-label="Annotation text" value={selectedMark?.kind === "text" ? selectedMark.text || "" : text} onChange={(event) => selectedMark?.kind === "text" ? updateMark(selectedMark.id, { text: event.target.value }) : setText(event.target.value)}/></label><label className="color-field"><span>Color</span><input aria-label="Annotation color" type="color" value={selectedMark?.color || color} onChange={(event) => { setColor(event.target.value); if (selected) updateMark(selected, { color: event.target.value }); }}/></label></div>}
+    {tool === "edit" && <div className="studio-inspector"><label><span>Text</span><input aria-label="Annotation text" maxLength={2000} value={selectedMark?.kind === "text" ? selectedMark.text || "" : text} onChange={(event) => selectedMark?.kind === "text" ? updateMark(selectedMark.id, { text: event.target.value }) : setText(event.target.value)}/></label><label className="color-field"><span>Color</span><input aria-label="Annotation color" type="color" value={selectedMark?.color || color} onChange={(event) => { setColor(event.target.value); if (selected) updateMark(selected, { color: event.target.value }); }}/></label></div>}
     {tool === "forms" && <button type="button" className="subtle-button detect-fields" disabled={disabled || !pdf} onClick={() => void suggestFields()}>Suggest fields near Name, Email, or Date labels</button>}
-    {selectedMark?.name && tool === "forms" && <div className="studio-inspector"><label><span>Field name</span><input aria-label="Field name" value={selectedMark.name} onChange={(event) => updateMark(selectedMark.id, { name: event.target.value })}/></label>{selectedMark.kind === "dropdown" && <label><span>Options, comma separated</span><input aria-label="Dropdown options" value={selectedMark.options?.join(", ") || ""} onChange={(event) => updateMark(selectedMark.id, { options: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })}/></label>}</div>}
+    {selectedMark?.name && tool === "forms" && <div className="studio-inspector"><label><span>Field name</span><input aria-label="Field name" maxLength={128} value={selectedMark.name} onChange={(event) => updateMark(selectedMark.id, { name: event.target.value })}/></label>{selectedMark.kind === "dropdown" && <label><span>Options, comma separated</span><input aria-label="Dropdown options" maxLength={4096} value={selectedMark.options?.join(", ") || ""} onChange={(event) => updateMark(selectedMark.id, { options: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })}/></label>}</div>}
     <div className="studio-desk"><div className={`studio-page ${editable ? "interactive" : ""} mode-${mode}`} style={{ aspectRatio: `1 / ${ratio}`, maxWidth: `${580 / ratio}px`, marginInline: "auto" }} onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={() => { drag.current = null; setDraft(null); }}>
       {preview && <img src={preview} alt={`Page ${pageIndex + 1} of ${file.name}`} draggable={false}/>}
       {preview && <svg className="studio-overlay" viewBox={`0 0 1000 ${1000 * ratio}`} aria-label="Page annotations">{marks.filter((mark) => mark.page === pageIndex).map(draw)}{draft && draw(draft)}</svg>}
@@ -137,7 +139,7 @@ export function DocumentStudio({ file, tool, marks, setMarks, disabled, basePath
     </div></div>
     {error && <p className="studio-note" role="status">{error}</p>}
     {editable && <p className="studio-note">{mode === "select" ? "Select a mark to move it. Use the toolbar to add content." : mode === "text" || mode === "image" ? "Click the page to place it. Drag a placed item to move it." : "Drag on the page to select an area. Changes stay on your device."}</p>}
-    <input ref={imageInput} type="file" accept="image/png,image/jpeg" hidden onChange={(event) => { const selected = event.target.files?.[0]; if (selected) { const reader = new FileReader(); reader.onload = () => { setImage(String(reader.result)); const img = new Image(); img.onload = () => setImageRatio(img.naturalHeight / img.naturalWidth); img.src = String(reader.result); setMode("image"); }; reader.readAsDataURL(selected); } event.currentTarget.value = ""; }}/>
+    <input ref={imageInput} type="file" accept="image/png,image/jpeg" hidden onChange={(event) => { const selected = event.target.files?.[0]; if (selected) { void validateImageFile(selected).then(() => { const reader = new FileReader(); reader.onload = () => { setImage(String(reader.result)); const img = new Image(); img.onload = () => setImageRatio(img.naturalHeight / img.naturalWidth); img.src = String(reader.result); setMode("image"); }; reader.readAsDataURL(selected); }).catch((caught) => setError(caught instanceof Error ? caught.message : "Choose a valid JPG or PNG image.")); } event.currentTarget.value = ""; }}/>
   </div>;
 }
 export function SignaturePad({ onChange, disabled }: { onChange: (image: string) => void; disabled: boolean }) {

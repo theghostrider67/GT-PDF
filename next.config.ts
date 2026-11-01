@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   trailingSlash: true,
+  poweredByHeader: false,
+  images: { unoptimized: true },
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || "",
   ...(process.env.GT_PDF_STATIC_EXPORT === "true" ? { output: "export" as const } : {}),
   webpack(config, { isServer, webpack }) {

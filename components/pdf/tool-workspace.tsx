@@ -3,6 +3,7 @@
 import { ArrowDown, ArrowUp, Check, Download, FileOutput, Gauge, LockKeyhole, Plus, ShieldCheck, Sparkles, UploadCloud, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { insetCropBox, parsePageSequence, pdfTextRows } from "@/lib/pdf-utils";
+import { assertBatchSize, assertPageCount, assertPageGeometry, validateInputFile, validateImageFile, FILE_LIMITS } from "@/lib/file-safety";
 import { tools, advancedTools, type ToolId } from "@/lib/tools";
 
 import { ArrowLeft, ArrowRight, ChevronDown, ImagePlus, Workflow } from "lucide-react";
@@ -42,6 +43,9 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
   const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const validationJob = useRef<AbortController | null>(null);
+  useEffect(() => () => validationJob.current?.abort(), []);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [pageRange, setPageRange] = useState(["organize", "pdf-images"].includes(toolId) ? "" : "1");
@@ -70,7 +74,7 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
     const frame = requestAnimationFrame(() => {
       try {
         const saved = JSON.parse(localStorage.getItem("ghost-pdf-recent") || "[]");
-        const valid: ToolId[] = Array.isArray(saved) ? saved.filter((id): id is ToolId => tools.some((tool) => tool.id === id)) : [];
+        const valid: ToolId[] = Array.isArray(saved) ? saved.slice(0, 20).filter((id): id is ToolId => tools.some((tool) => tool.id === id)) : [];
         const next = [toolId, ...valid.filter((id) => id !== toolId)].slice(0, 5);
         setRecent(next); localStorage.setItem("ghost-pdf-recent", JSON.stringify(next));
       } catch { /* Recent tools are optional. */ }
@@ -105,6 +109,7 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
       const { PDFDocument, PDFTextField, PDFCheckBox, PDFDropdown, PDFOptionList, PDFRadioGroup } = await import("pdf-lib");
       const pdf = await PDFDocument.load(await files[0].arrayBuffer());
       const fields: AdvancedOptions["formValues"] = [];
+      if (pdf.getForm().getFields().length > 2000) throw new Error("This PDF has too many form fields.");
       for (const field of pdf.getForm().getFields()) {
         if (field instanceof PDFTextField) fields.push({ name: field.getName(), kind: "text", value: field.getText() || "" });
         else if (field instanceof PDFCheckBox) fields.push({ name: field.getName(), kind: "check", value: field.isChecked() });
@@ -115,10 +120,14 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
     })().catch(() => undefined);
     return () => { active = false; };
   }, [files, activeTool.id]);
-  const readImageFile = (file: File | undefined, setImage: (value: string) => void) => { if (!file) return; const reader = new FileReader(); reader.onload = () => setImage(String(reader.result)); reader.readAsDataURL(file); };
+  const readImageFile = async (file: File | undefined, setImage: (value: string) => void) => {
+    if (!file) return;
+    try { await validateImageFile(file); const reader = new FileReader(); reader.onload = () => setImage(String(reader.result)); reader.onerror = () => setError("This image could not be read."); reader.readAsDataURL(file); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Choose a valid JPG or PNG image."); }
+  };
 
-  const addFiles = (incoming: File[]) => {
-    if (jobRunning.current) return;
+  const addFiles = async (incoming: File[]) => {
+    if (jobRunning.current || validationJob.current) return;
     setError("");
     setMessage("");
     const valid = incoming.filter((file) => {
@@ -134,13 +143,19 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
       setError(`Choose ${wanted}.`);
       return;
     }
-    setResult(null); setMarks([]);
-    setFiles((current) => {
-      const limit = activeTool.id === "compare" ? 2 : ["edit", "forms", "redact", "crop", "sign", "translate", "summarize", "html-pdf"].includes(activeTool.id) ? 1 : 20;
-      const combined = limit === 1 ? valid.slice(0, 1) : [...current, ...valid];
-      if (combined.length > limit) setError(`This tool accepts up to ${limit} files. The first ${limit} were kept.`);
-      return combined.slice(0, limit);
-    });
+    const limit = activeTool.id === "compare" ? 2 : ["edit", "forms", "redact", "crop", "sign", "translate", "summarize", "html-pdf"].includes(activeTool.id) ? 1 : 20;
+    const combined = limit === 1 ? valid.slice(0, 1) : [...files, ...valid];
+    const controller = new AbortController(); validationJob.current = controller; setValidating(true);
+    try {
+      if (combined.length > limit) throw new Error(`This tool accepts up to ${limit} files.`);
+      assertBatchSize(combined);
+      for (const file of valid.slice(0, limit)) await validateInputFile(file, activeTool.id, controller.signal);
+      if (!controller.signal.aborted) { setResult(null); setMarks([]); setFiles(combined); }
+    } catch (caught) {
+      if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "This file could not be checked.");
+    } finally {
+      if (validationJob.current === controller) { validationJob.current = null; if (!controller.signal.aborted) setValidating(false); }
+    }
   };
   const moveFile = (index: number, direction: -1 | 1) => setFiles((current) => {
     const target = index + direction;
@@ -152,7 +167,13 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
 
   const processFiles = async (selectedFiles = files, nested = false): Promise<void | { output: Uint8Array; filename: string; mime: string }> => {
     if (!selectedFiles.length && activeTool.id === "html-pdf" && options.html.trim()) selectedFiles = [new File([options.html], "document.html", { type: "text/html" })];
-    if (!selectedFiles.length || (!nested && jobRunning.current)) return;
+    if (!selectedFiles.length || validationJob.current || (!nested && jobRunning.current)) return;
+    if (!nested) { jobRunning.current = true; setBusy(true); }
+    try { assertBatchSize(selectedFiles); for (const file of selectedFiles) await validateInputFile(file, activeTool.id); }
+    catch (caught) {
+      if (nested) throw caught;
+      setError(caught instanceof Error ? caught.message : "This file could not be checked."); jobRunning.current = false; setBusy(false); return;
+    }
     if (!nested && selectedFiles.length > 1 && !["merge", "images", "scan", "compare"].includes(activeTool.id)) {
       jobRunning.current = true;
       setBusy(true);
@@ -183,7 +204,7 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
     }
     if (activeTool.id === "merge" && selectedFiles.length < 2) {
       setError("Add at least two PDFs to merge.");
-      return;
+      jobRunning.current = false; setBusy(false); return;
     }
     if (!nested) {
       jobRunning.current = true;
@@ -228,12 +249,13 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
         pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
         pdfTask = pdfjs.getDocument({
           data: new Uint8Array(await selectedFiles[0].arrayBuffer()),
+          maxImageSize: FILE_LIMITS.imagePixels, canvasMaxAreaInBytes: 64 * 1024 * 1024,
           cMapUrl: `${publicBasePath}/pdfjs/cmaps/`,
           standardFontDataUrl: `${publicBasePath}/pdfjs/standard_fonts/`,
           wasmUrl: `${publicBasePath}/pdfjs/wasm/`,
           iccUrl: `${publicBasePath}/pdfjs/iccs/`,
         });
-        return pdfTask.promise;
+        const doc = await pdfTask.promise; assertPageCount(doc.numPages); return doc;
       };
       let output: Uint8Array;
       let mime = "application/pdf";
@@ -267,7 +289,7 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
         let finalSection = "";
         for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
           const page = await document.getPage(pageNumber);
-          const original = page.getViewport({ scale: 1 });
+          const original = page.getViewport({ scale: 1 }); assertPageGeometry(original.width, original.height);
           const viewport = page.getViewport({ scale: Math.min(2, 2400 / Math.max(original.width, original.height)) });
           const canvas = window.document.createElement("canvas");
           canvas.width = Math.ceil(viewport.width);
@@ -315,7 +337,7 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
         presentation.subject = `Converted from ${selectedFiles[0].name}`;
         for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
           const page = await document.getPage(pageNumber);
-          const original = page.getViewport({ scale: 1 });
+          const original = page.getViewport({ scale: 1 }); assertPageGeometry(original.width, original.height);
           const viewport = page.getViewport({ scale: Math.min(2, 2400 / Math.max(original.width, original.height)) });
           const canvas = window.document.createElement("canvas");
           canvas.width = Math.ceil(viewport.width);
@@ -343,7 +365,8 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
       } else if (activeTool.id === "merge") {
         const result = await PDFDocument.create();
         for (const file of selectedFiles) {
-          const source = await PDFDocument.load(await file.arrayBuffer());
+          const source = await PDFDocument.load(await file.arrayBuffer()); assertPageCount(source.getPageCount());
+          assertPageCount(result.getPageCount() + source.getPageCount(), FILE_LIMITS.outputPages);
           const copied = await result.copyPages(source, source.getPageIndices());
           copied.forEach((page) => result.addPage(page));
         }
@@ -366,7 +389,7 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
         output = await result.save({ useObjectStreams: true });
         filename = "images.pdf";
       } else {
-        const source = await PDFDocument.load(await selectedFiles[0].arrayBuffer());
+        const source = await PDFDocument.load(await selectedFiles[0].arrayBuffer()); assertPageCount(source.getPageCount());
         const total = source.getPageCount();
         if (activeTool.id === "extract" || activeTool.id === "organize") {
           const result = await PDFDocument.create();
@@ -385,7 +408,8 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
           const result = await PDFDocument.create();
           const original = await result.copyPages(source, source.getPageIndices());
           original.forEach((page) => result.addPage(page));
-          const duplicated = await result.copyPages(source, parsePageSequence(pageRange, total));
+          const selection = parsePageSequence(pageRange, total); assertPageCount(total + selection.length, FILE_LIMITS.outputPages);
+          const duplicated = await result.copyPages(source, selection);
           duplicated.forEach((page) => result.addPage(page));
           output = await result.save({ useObjectStreams: true });
         } else if (activeTool.id === "reverse") {
@@ -492,7 +516,7 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
   const hasInput = files.length > 0 || (activeTool.id === "html-pdf" && Boolean(options.html.trim()));
   const canPreview = files.length > 0 && /\.pdf$/i.test(files[0].name) && !["unlock", "repair", "protect", "compare", "organize"].includes(activeTool.id) && !(activeTool.id === "sign" && signatureMode === "type");
   const saveRecipe = () => { try { localStorage.setItem("ghost-pdf-workflow", JSON.stringify(options.workflow)); setMessage("Workflow saved on this device."); } catch { setError("This browser could not save the workflow."); } };
-  const loadRecipe = () => { try { const saved = JSON.parse(localStorage.getItem("ghost-pdf-workflow") || "null"); if (saved && [0, 90, 180, 270].includes(saved.rotate) && typeof saved.number === "boolean" && typeof saved.watermark === "string" && typeof saved.compress === "boolean") { setOptions((current) => ({ ...current, workflow: saved })); setWorkflowEnabled(true); setMessage("Saved workflow loaded."); } else setMessage("Save a workflow first, then reuse it here."); } catch { setError("The saved workflow could not be read."); } };
+  const loadRecipe = () => { try { const saved = JSON.parse(localStorage.getItem("ghost-pdf-workflow") || "null"); if (saved && [0, 90, 180, 270].includes(saved.rotate) && typeof saved.number === "boolean" && typeof saved.watermark === "string" && saved.watermark.length <= 40 && typeof saved.compress === "boolean") { setOptions((current) => ({ ...current, workflow: saved })); setWorkflowEnabled(true); setMessage("Saved workflow loaded."); } else setMessage("Save a workflow first, then reuse it here."); } catch { setError("The saved workflow could not be read."); } };
 
   return <main id="top" className="tool-page">
     <a className="skip-link" href="#workspace">Skip to workspace</a>
@@ -502,17 +526,18 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
       <nav className="tool-breadcrumb" aria-label="Breadcrumb"><Link href="/#tools"><ArrowLeft/> All tools</Link><span>/</span><span aria-current="page">{activeTool.name}</span></nav>
       <div className="workspace-heading"><div><span className="kicker">YOUR WORKSPACE</span><h1>{activeTool.name}<span className="workspace-dot">.</span></h1><p>{activeTool.description}</p></div><span className="local-processing"><LockKeyhole/> Private on your device</span></div>
       {recent.some((id) => id !== activeTool.id) && <div className="recent-tools"><span>Pick up where you left off</span>{recent.filter((id) => id !== activeTool.id).slice(0, 4).map((id) => { const tool = tools.find((item) => item.id === id); return tool && <Link prefetch={false} key={id} href={toolPath(tool)} aria-current={id === activeTool.id ? "page" : undefined} className={id === activeTool.id ? "active" : ""}>{tool.name}</Link>; })}</div>}
-      <div className="workspace-card"><fieldset className="processing-fields" disabled={busy}>
+      <div className="workspace-card"><fieldset className="processing-fields" disabled={busy || validating}>
         <div className="input-pane"><div className={`dropzone ${dragging ? "dragging" : ""} ${files.length ? "has-files" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles([...event.dataTransfer.files]); }}>
           <input ref={fileInput} type="file" accept={activeTool.accept} multiple={!isSingleFileTool} capture={activeTool.id === "scan" ? "environment" : undefined} hidden onChange={(event) => { addFiles([...(event.target.files ?? [])]); event.currentTarget.value = ""; }}/>
-          <span className="upload-icon"><UploadCloud/></span><h3>{files.length ? isSingleFileTool ? "Your file is ready." : "Room for another?" : `Drop ${inputNoun} here.`}</h3><p>{files.length ? isSingleFileTool ? "Continue below or choose a replacement file." : "Add more files or continue with your selection." : "A simple drop. A little less work."}</p><button type="button" className="secondary-button" onClick={() => fileInput.current?.click()}><Plus/>{activeTool.id === "scan" ? "Capture or choose photos" : files.length ? isSingleFileTool ? "Replace file" : "Add files" : "Choose files"}</button><small><LockKeyhole/>{activeTool.id === "compare" ? "2 PDFs" : isSingleFileTool ? activeTool.id === "html-pdf" ? "1 HTML file" : "1 PDF" : "Up to 20 files"} · never uploaded</small>
+          <span className="upload-icon"><UploadCloud/></span><h3>{files.length ? isSingleFileTool ? "Your file is ready." : "Room for another?" : `Drop ${inputNoun} here.`}</h3><p>{files.length ? isSingleFileTool ? "Continue below or choose a replacement file." : "Add more files or continue with your selection." : "A simple drop. A little less work."}</p><button type="button" className="secondary-button" onClick={() => fileInput.current?.click()}><Plus/>{activeTool.id === "scan" ? "Capture or choose photos" : files.length ? isSingleFileTool ? "Replace file" : "Add files" : "Choose files"}</button><small><LockKeyhole/>{activeTool.id === "compare" ? "2 PDFs" : isSingleFileTool ? activeTool.id === "html-pdf" ? "1 HTML file" : "1 PDF" : "Up to 20 files"} · 50 MB each · never uploaded</small>
         </div>
-        {activeTool.id === "html-pdf" && <label className="option-field html-input"><span>Or paste your HTML</span><textarea aria-label="HTML source" rows={7} placeholder="<h1>Hello, world.</h1>" value={options.html} onChange={(event) => setOptions((current) => ({ ...current, html: event.target.value }))}/><small>Local HTML and embedded data images only. External websites and resources are not fetched.</small></label>}
+        {activeTool.id === "html-pdf" && <label className="option-field html-input"><span>Or paste your HTML</span><textarea aria-label="HTML source" maxLength={1_048_576} rows={7} placeholder="<h1>Hello, world.</h1>" value={options.html} onChange={(event) => setOptions((current) => ({ ...current, html: event.target.value }))}/><small>Local HTML and embedded data images only. External websites and resources are not fetched.</small></label>}
         {files.length > 0 && <div className="selected-files"><div className="file-list-heading"><strong>{files.length} {files.length === 1 ? "file" : "files"} ready</strong><span>{formatBytes(files.reduce((sum, file) => sum + file.size, 0))}</span></div><div className="file-list">{files.map((file, index) => <div className="file-row" key={`${file.name}-${file.lastModified}-${index}`}><span className="file-type">{file.name.split(".").pop()?.slice(0, 4).toUpperCase()}</span><span className="file-name"><strong>{file.name}</strong><small>{formatBytes(file.size)} · stays on your device</small></span>{activeTool.multiple && <span className="order-buttons"><button type="button" onClick={() => moveFile(index, -1)} disabled={index === 0} aria-label={`Move ${file.name} up`}><ArrowUp/></button><button type="button" onClick={() => moveFile(index, 1)} disabled={index === files.length - 1} aria-label={`Move ${file.name} down`}><ArrowDown/></button></span>}<button type="button" className="remove-button" onClick={() => { setFiles((current) => current.filter((_, position) => position !== index)); setMarks([]); setResult(null); }} aria-label={`Remove ${file.name}`}><X/></button></div>)}</div></div>}
         {activeTool.id === "organize" && files[0] && <PageOrganizer file={files[0]} sequence={pageRange} onChange={setPageRange} basePath={publicBasePath} disabled={busy}/>}
         {canPreview && <DocumentStudio key={`${activeTool.id}-${files[0].name}-${files[0].lastModified}-${signatureMode}`} file={files[0]} tool={activeTool.id} marks={marks} setMarks={setMarks} disabled={busy} basePath={publicBasePath} signatureImage={signatureImage} formValues={options.formValues}/>}
         </div>
         <div className={`job-panel ${hasInput ? "ready" : "waiting"}`}><div className="settings-heading"><span className="settings-icon"><activeTool.Icon/></span><div><h3>{hasInput ? "Make it just right." : "A fresh start awaits."}</h3><p>{hasInput ? "A few options. Then you’re on your way." : "Your options will be ready when your file is."}</p></div><span className="step-number">02</span></div>
+        {validating && <p className="inline-note" role="status">Checking file format and safety limits…</p>}
         {hasInput ? <>
             {["extract", "organize", "duplicate", "delete"].includes(activeTool.id) && <label className="option-field"><span>{rangeLabel}</span><input value={pageRange} onChange={(event) => setPageRange(event.target.value)} placeholder="1-3, 6, 9-12" /><small>{rangeHelp}</small></label>}
             {activeTool.id === "rotate" && <fieldset className="option-field"><legend>Rotate every page</legend><div className="choice-row">{[90, 180, 270].map((angle) => <button type="button" className={rotation === angle ? "choice active" : "choice"} key={angle} onClick={() => setRotation(angle)}>{angle}°</button>)}</div></fieldset>}
@@ -530,7 +555,7 @@ export default function ToolWorkspace({ toolId }: { toolId: ToolId }) {
           <AdvancedToolOptions id={activeTool.id} options={options} setOptions={setOptions} pageRange={pageRange} setPageRange={setPageRange} translationSupport={translationSupport} summarySupport={summarySupport}/>
           {!["protect", "pdfa", "forms", "pdf-images", "split", "markdown", "summarize", "translate", "pdf-word", "pdf-excel", "pdf-powerpoint"].includes(activeTool.id) && <details className="workflow-panel"><summary><Workflow/><span>Do a little more. In one go.</span><ChevronDown/></summary><div className="workflow-content"><label className="check-option"><input type="checkbox" checked={workflowEnabled} onChange={(event) => setWorkflowEnabled(event.target.checked)}/><span>Apply a finishing workflow</span></label>{workflowEnabled && <><label className="option-field"><span>Then rotate every page</span><select value={options.workflow.rotate} onChange={(event) => setOptions((current) => ({ ...current, workflow: { ...current.workflow, rotate: Number(event.target.value) } }))}><option value="0">Keep orientation</option><option value="90">90° clockwise</option><option value="180">180°</option><option value="270">270° clockwise</option></select></label><label className="check-option"><input type="checkbox" checked={options.workflow.number} onChange={(event) => setOptions((current) => ({ ...current, workflow: { ...current.workflow, number: event.target.checked } }))}/><span>Add page numbers</span></label><label className="option-field"><span>Then add a watermark</span><input value={options.workflow.watermark} maxLength={40} placeholder="Optional text" onChange={(event) => setOptions((current) => ({ ...current, workflow: { ...current.workflow, watermark: event.target.value } }))}/></label><label className="check-option"><input type="checkbox" checked={options.workflow.compress} onChange={(event) => setOptions((current) => ({ ...current, workflow: { ...current.workflow, compress: event.target.checked } }))}/><span>Finish with visual compression (flattens pages)</span></label></>}<div className="recipe-actions"><button type="button" className="subtle-button" onClick={saveRecipe}>Save workflow</button><button type="button" className="subtle-button" onClick={loadRecipe}>Use saved workflow</button></div><small>Only this recipe is saved. Your documents and passwords are never stored.</small></div></details>}
           {error && <p className="feedback error" role="alert">{error}</p>}{message && <p className="feedback success" role="status"><Check/>{message}</p>}
-          <button type="button" className="process-button" onClick={() => void processFiles()} disabled={busy || (activeTool.id === "translate" && ["unavailable", "checking"].includes(translationSupport))}>{busy ? <><span className="spinner"/><span>{progress || "Processing on your device…"}</span></> : <><span>{activeTool.id === "edit" || activeTool.id === "forms" || activeTool.id === "redact" ? "Save your PDF" : activeTool.name}</span><ArrowRight/></>}</button>
+          <button type="button" className="process-button" onClick={() => void processFiles()} disabled={busy || validating || (activeTool.id === "translate" && ["unavailable", "checking"].includes(translationSupport))}>{busy ? <><span className="spinner"/><span>{progress || "Processing on your device…"}</span></> : <><span>{activeTool.id === "edit" || activeTool.id === "forms" || activeTool.id === "redact" ? "Save your PDF" : activeTool.name}</span><ArrowRight/></>}</button>
           <p className="processing-promise"><LockKeyhole/> Made here. Downloaded here. Never uploaded.</p>
         </> : <div className="workspace-empty"><div className="empty-orbit"><FileOutput/><Sparkles/></div><span className="empty-step">01 / Choose your file</span><h4>Good things start<br/>with a simple drop.</h4><p>Choose a file on the left.<br/>We’ll take it from there.</p><span><ShieldCheck/> Private. Free. Yours.</span></div>}
         {!hasInput && error && <p className="feedback error" role="alert">{error}</p>}

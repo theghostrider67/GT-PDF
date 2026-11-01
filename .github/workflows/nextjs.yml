@@ -27,6 +27,8 @@ jobs:
         id: pages
         uses: actions/configure-pages@v5
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run test:safety
       - run: npm run test:regressions
       - run: npm run test:pdf
       - run: npm run test:office
@@ -42,6 +44,10 @@ jobs:
           NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
       - name: Check the expanded PDF toolkit
         run: npm run test:toolkit
+        env:
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+      - name: Check browser security boundaries
+        run: npm run test:security
         env:
           NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
       - run: npm run lint
