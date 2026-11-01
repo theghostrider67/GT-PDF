@@ -118,4 +118,11 @@ try {
   await choose("Translate PDF"); if (await page.locator(".process-button").isDisabled()) assert((await page.locator(".advanced-options").textContent()).includes("unavailable")); else console.log("INFO native translation available; browser-managed language download requires a real language pack for end-to-end verification");
   await page.setViewportSize({ width: 390, height: 844 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false); await page.getByRole("button", { name: "Toggle navigation" }).click(); assert.equal(await page.getByRole("button", { name: "Toggle navigation" }).getAttribute("aria-expanded"), "true");
   assert.deepEqual(errors, []); console.log("PASS visual editor, irreversible redaction, forms, visual crop, OCR, translation capability messaging, and mobile navigation");
+} catch (error) {
+  // Surface the actual browser/assertion failure in public CI annotations.
+  if (process.env.GITHUB_ACTIONS) {
+    const detail = (error instanceof Error ? error.stack || error.message : String(error)).replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+    console.error(`::error title=PDF toolkit verification failed::${detail}`);
+  }
+  throw error;
 } finally { await browser?.close(); await new Promise((resolve) => server.close(resolve)); await rm(directory, { recursive: true, force: true }); }
