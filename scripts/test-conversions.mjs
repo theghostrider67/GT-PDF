@@ -18,12 +18,12 @@ await stat(path.join(out, "index.html")).catch(() => { throw new Error("Run npm 
 const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const netlify = await readFile(path.join(root, "netlify.toml"), "utf8");
 const policy = netlify.match(/Content-Security-Policy\s*=\s*"([^"]+)"/)?.[1];
-const mime = { ".html": "text/html", ".js": "application/javascript", ".mjs": "application/javascript", ".css": "text/css", ".wasm": "application/wasm", ".svg": "image/svg+xml", ".json": "application/json" };
+const mime = { ".txt": "text/plain; charset=utf-8", ".html": "text/html", ".js": "application/javascript", ".mjs": "application/javascript", ".css": "text/css", ".wasm": "application/wasm", ".svg": "image/svg+xml", ".json": "application/json" };
 const server = createServer(async (request, response) => {
   try {
     let pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
     if (base && pathname.startsWith(base + "/")) pathname = pathname.slice(base.length);
-    const target = path.resolve(out, "." + (pathname === "/" ? "/index.html" : pathname));
+    const target = path.resolve(out, "." + (pathname.endsWith("/") ? pathname + "index.html" : pathname));
     if (!target.startsWith(out + path.sep)) { response.writeHead(403).end(); return; }
     response.setHeader("Content-Type", mime[path.extname(target)] || "application/octet-stream");
     if (policy) response.setHeader("Content-Security-Policy", policy);
@@ -39,10 +39,16 @@ try {
   const failures = [];
   const external = [];
   page.on("pageerror", (error) => failures.push(error.message));
-  page.on("requestfailed", (request) => failures.push(`${request.url()}: ${request.failure()?.errorText}`));
+  page.on("requestfailed", (request) => {
+    // Chromium can report an aborted, bodyless HEAD probe after Next has read
+    // its successful status. Keep asserting failures for route/data/engine GETs.
+    if (request.method() === "HEAD" && request.failure()?.errorText === "net::ERR_ABORTED") return;
+    failures.push(`${request.url()}: ${request.failure()?.errorText}`);
+  });
   page.on("response", (response) => { if (response.status() >= 400) failures.push(`${response.status()} ${response.url()}`); });
   page.on("request", (request) => { if (/^https?:/.test(request.url()) && !request.url().startsWith("http://127.0.0.1:")) external.push(request.url()); });
-  await page.goto(process.env.GHOST_PDF_TEST_URL || `http://127.0.0.1:${server.address().port}${base}/`, { waitUntil: "networkidle" });
+  const homeUrl = process.env.GHOST_PDF_TEST_URL || `http://127.0.0.1:${server.address().port}${base}/`;
+  await page.goto(homeUrl, { waitUntil: "networkidle" });
   assert.match(await page.title(), /GHOST PDF/);
   assert.equal(await page.locator("header .brand").textContent(), "GHOST PDF");
 
@@ -60,7 +66,11 @@ try {
   await writeFile(sourcePath, await source.save());
 
   async function convert(tool, input, output) {
-    await page.locator(".tool-card").filter({ has: page.getByText(tool, { exact: true }) }).click();
+    await page.goto(homeUrl, { waitUntil: "networkidle" });
+    const card = page.locator("a.tool-card").filter({ has: page.getByText(tool, { exact: true }) });
+    const href = await card.getAttribute("href"); await card.click();
+    await page.waitForURL((url) => url.pathname === href);
+    await page.getByRole("heading", { level: 1, name: `${tool}.`, exact: true }).waitFor();
     await page.locator('input[type="file"]').setInputFiles(input);
     const download = page.waitForEvent("download", { timeout: 60000 });
     download.catch(() => {});

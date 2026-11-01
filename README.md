@@ -32,10 +32,12 @@ Convert, edit, organize, and protect your documents with a glass-style interface
 
 ## How to use GHOST PDF
 
-1. **Find a tool** using search, categories, or the everyday essentials shortcuts.
+1. **Find a tool** using search, categories, or the everyday essentials shortcuts. Selecting a tool opens its own dedicated page, such as [PDF to Word](https://gt-pdf.vercel.app/tools/pdf-to-word/).
 2. **Choose your files** or drop them into the workspace. For scans, use your camera or choose photos. For HTML, you can paste the markup directly.
 3. **Make it just right:** adjust the settings, arrange page thumbnails, draw on the preview, or fill form fields.
 4. **Run the tool** and download your result. Add a finishing workflow if you also want rotation, numbers, a watermark, or compression.
+
+Use **All tools** to return to the catalog or choose a recent tool to open another workspace. Each tool page can be bookmarked, shared, or refreshed directly.
 
 For page ranges, use `1-3, 6`. To split into separate groups, use `1-3; 4-6; 7`. To reorder pages, drag their thumbnails or enter an order such as `3, 1, 2`.
 

@@ -18,12 +18,12 @@ if (outputDirectory) await mkdir(outputDirectory, { recursive: true });
 const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const out = path.join(root, "out");
 const policy = (await readFile(path.join(root, "netlify.toml"), "utf8")).match(/Content-Security-Policy\s*=\s*"([^"]+)"/)?.[1];
-const mime = { ".html": "text/html", ".js": "application/javascript", ".mjs": "application/javascript", ".css": "text/css", ".wasm": "application/wasm", ".svg": "image/svg+xml" };
+const mime = { ".txt": "text/plain; charset=utf-8", ".html": "text/html", ".js": "application/javascript", ".mjs": "application/javascript", ".css": "text/css", ".wasm": "application/wasm", ".svg": "image/svg+xml" };
 const server = createServer(async (request, response) => {
   try {
     let pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
     if (base && pathname.startsWith(base + "/")) pathname = pathname.slice(base.length);
-    const filename = path.resolve(out, "." + (pathname === "/" ? "/index.html" : pathname));
+    const filename = path.resolve(out, "." + (pathname.endsWith("/") ? pathname + "index.html" : pathname));
     if (!filename.startsWith(out + path.sep)) { response.writeHead(403).end(); return; }
     if (policy) response.setHeader("Content-Security-Policy", policy);
     response.setHeader("Content-Type", mime[path.extname(filename)] || "application/octet-stream"); response.end(await readFile(filename));
@@ -37,8 +37,30 @@ try {
   const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1440, height: 1100 } });
   const page = await context.newPage(); const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(process.env.GHOST_PDF_TEST_URL || `http://127.0.0.1:${server.address().port}${base}/`, { waitUntil: "networkidle" });
+  const homeUrl = process.env.GHOST_PDF_TEST_URL || `http://127.0.0.1:${server.address().port}${base}/`;
+  await page.goto(homeUrl, { waitUntil: "networkidle" });
   assert.equal(await page.locator(".tool-card").count(), 38);
+  assert.equal(await page.locator("#workspace, input[type=file]").count(), 0, "The catalog has no conversion workspace");
+  const toolLinks = await page.locator("a.tool-card").evaluateAll((links) => links.map((link) => ({ href: link.href, name: link.querySelector(".tool-title").textContent })));
+  assert.equal(new Set(toolLinks.map((link) => link.href)).size, 38);
+  for (const link of toolLinks) {
+    const response = await page.request.get(link.href);
+    assert.equal(response.status(), 200, link.href);
+    const html = await response.text(); assert(html.includes(`${link.name} — GHOST PDF`), link.href);
+    assert(!html.includes('class="tool-grid"'), "Dedicated pages exclude the catalog");
+  }
+  assert.equal((await page.request.get(new URL("tools/not-a-pdf-tool/", homeUrl).href)).status(), 404);
+  await page.locator('a.tool-card').filter({ has: page.getByText("PDF to Word", { exact: true }) }).click();
+  await page.waitForURL(/\/tools\/pdf-to-word\/$/); await page.getByRole("heading", { level: 1, name: "PDF to Word." }).waitFor();
+  await page.reload(); await page.getByRole("heading", { level: 1, name: "PDF to Word." }).waitFor();
+  await page.goBack(); await page.locator("#tools").waitFor();
+  await page.goForward(); await page.getByRole("heading", { level: 1, name: "PDF to Word." }).waitFor();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
+  await page.waitForFunction(() => document.activeElement === document.querySelector('input[aria-label="Search PDF tools"]'));
+  await page.goBack(); await page.getByRole("heading", { level: 1, name: "PDF to Word." }).waitFor();
+  await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "All tools" }).click();
+  await page.locator("#tools").waitFor();
+  console.log("PASS 38 dedicated routes, direct access, refresh, browser back/forward, and catalog/workspace separation");
   await page.getByRole("searchbox", { name: "Search PDF tools" }).fill("password");
   assert((await page.locator(".tool-card").count()) >= 2);
   await page.getByRole("searchbox", { name: "Search PDF tools" }).fill("");
@@ -68,9 +90,11 @@ try {
   const scanned = await PDFDocument.create(); const image = await scanned.embedPng(png); scanned.addPage([600, 800]).drawImage(image, { x: 0, y: 0, width: 600, height: 800 }); const scannedPath = path.join(directory, "scan.pdf"); await writeFile(scannedPath, await scanned.save());
   const formDoc = await PDFDocument.create(); const formPage = formDoc.addPage([500, 600]); formPage.drawText("Name:", { x: 35, y: 540 }); const form = formDoc.getForm(); const fullName = form.createTextField("Full Name"); fullName.addToPage(formPage, { x: 35, y: 470, width: 250, height: 30 }); const agree = form.createCheckBox("Accept"); agree.addToPage(formPage, { x: 35, y: 420, width: 20, height: 20 }); const formPath = path.join(directory, "form.pdf"); await writeFile(formPath, await formDoc.save());
   async function choose(name, inputs = [sourcePath]) {
-    await page.getByRole("searchbox", { name: "Search PDF tools" }).fill("");
-    await page.getByRole("tab", { name: "All tools", exact: true }).click();
-    await page.locator(".tool-card").filter({ has: page.getByText(name, { exact: true }) }).click();
+    await page.goto(homeUrl, { waitUntil: "networkidle" });
+    const card = page.locator("a.tool-card").filter({ has: page.getByText(name, { exact: true }) });
+    const href = await card.getAttribute("href"); await card.click();
+    await page.waitForURL((url) => url.pathname === href);
+    await page.getByRole("heading", { level: 1, name: `${name}.`, exact: true }).waitFor();
     if (inputs.length) await page.locator('input[type="file"][hidden]').first().setInputFiles(inputs);
   }
   async function run(output, timeout = 60000) {
@@ -125,8 +149,7 @@ try {
   if (!translationUnavailable) console.log("INFO native translation available; browser-managed language download requires a real language pack for end-to-end verification");
   const stalledBrowser = await context.newPage();
   await stalledBrowser.addInitScript(() => { Object.defineProperty(globalThis, "Translator", { configurable: true, value: { availability: () => new Promise(() => {}) } }); });
-  await stalledBrowser.goto(page.url(), { waitUntil: "networkidle" });
-  await stalledBrowser.locator(".tool-card").filter({ has: stalledBrowser.getByText("Translate PDF", { exact: true }) }).click();
+  await stalledBrowser.goto(new URL("tools/translate-pdf/", homeUrl).href, { waitUntil: "networkidle" });
   await stalledBrowser.locator('input[type="file"][hidden]').first().setInputFiles(sourcePath);
   await stalledBrowser.getByText(/Private translation is unavailable/).waitFor({ state: "visible", timeout: 15000 });
   assert(await stalledBrowser.locator(".process-button").isDisabled());
