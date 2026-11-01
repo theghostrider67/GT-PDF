@@ -1,66 +1,63 @@
 # GHOST PDF
 
-Twenty-one document tools that process files locally in the browser. Selected documents are not uploaded to an application server.
+**21 free document tools. All in your browser.**
 
-## Tools
+Convert, combine, and customize your documents without creating an account. GHOST PDF processes your files on your device, so your documents are not uploaded to a conversion server.
 
-- Merge, extract, organize, rotate, optimize, duplicate, delete, reverse, and crop PDF pages
-- Add page numbers, watermarks, a typed signature, blank pages, and document metadata
-- Convert JPG/PNG images to PDF
-- Convert between PDF and Word, Excel, and PowerPoint
-- Process up to 20 files per job; separate conversions download together as a ZIP
+## Main features
 
-### Conversion limits
+### Convert your documents
 
-PDF-to-Word and PDF-to-PowerPoint preserve the page appearance as images, so the text in those Office outputs is not editable. Word output retains the size and orientation of each page (scaled only if it exceeds Word's 22-inch page limit). PowerPoint uses the first page's aspect ratio; differently sized pages fit inside the shared slide size.
+| Conversion | What you can do |
+| --- | --- |
+| PDF → Word | Keep the appearance of each page in a DOCX document. |
+| Word → PDF | Turn DOCX pages, including supported pictures and tables, into a PDF. |
+| PDF → PowerPoint | Place each PDF page on its own slide. |
+| PowerPoint → PDF | Convert PPTX slides, pictures, and text into PDF pages. |
+| PDF → Excel | Extract selectable text into worksheet rows and columns. |
+| Excel → PDF | Turn XLSX, XLS, or CSV files into readable PDF pages. |
+| Images → PDF | Combine JPG and PNG images into one PDF in your chosen order. |
 
-Word, Excel, and PowerPoint inputs are rendered locally with `@silurus/ooxml`, including supported pictures, tables, styling, and Unicode text. PDF output contains page images plus an invisible text layer for supported Latin characters. Pictures from a PDF-to-Office export can be converted back to PDF without OCR. Complex Office effects, unsupported objects, and unavailable fonts may render differently from Microsoft Office. Spreadsheet formulas use their saved cached results; they are not recalculated. Hidden sheets are skipped; large sheets are tiled into multiple pages.
+### Organize and edit PDFs
 
-PDF-to-Excel extracts selectable text and estimates columns from text positions. It does not reconstruct original spreadsheet formulas, charts, or styles. Scanned pages and image-only PDFs require OCR, which is not included.
+- **Merge** multiple PDFs into one document.
+- **Extract, reorder, duplicate, or delete** selected pages using page numbers and ranges.
+- **Rotate or reverse** pages, **crop** margins, and **add blank pages**.
+- **Optimize** the PDF's file structure.
 
-## Local development
+### Add finishing touches
 
-Requires Node.js **22.13 or newer**.
+- Place **page numbers** in six positions.
+- Add a **text watermark** with adjustable opacity.
+- Add a **typed signature** to the final page.
+- Update the document's **title, author, subject, and keywords**.
 
-```bash
-npm ci
-npm run dev
-```
+### Work privately and in batches
 
-Open `http://localhost:5173`. PDF.js workers, fonts, CMaps, image decoders, and color profiles are copied from the installed dependency into `public/` when a build or dev configuration loads. The Office parser WASM files are prepared in `public/office/` as well. All processing engines are served locally, without a third-party CDN or conversion service.
+- **Local processing:** your files stay on your device.
+- **No account or daily usage limit:** choose a tool and get started.
+- **Up to 20 files per job:** separate conversions download together as a ZIP.
+- **Choose the order:** arrange PDFs before merging or images before creating a PDF.
 
-## Validation
+## How to use GHOST PDF
 
-```bash
-npm run test:regressions
-npm run test:pdf
-npm run test:office
-npm run lint
-npx tsc --noEmit
-npm run build
-```
+1. **Choose a tool** for the conversion or edit you need.
+2. **Drop your files** into the workspace, or select them from your device.
+3. **Adjust the options:** reorder inputs, enter page ranges, choose a rotation, or add your text.
+4. **Run the tool** and download the finished file or batch ZIP.
 
-For the browser conversion tests (all six conversion directions, round trips, edited outputs, slide order, wide/long spreadsheets, XLS/CSV, branding, and deployed CSP):
+For example, enter `1-3, 6` to extract those pages, or `3, 1, 2` to create a new page order. To combine documents, choose **Merge PDF**, add your PDFs, arrange them, and merge.
 
-```bash
-npm run build:static
-npx playwright install chromium
-npm run test:conversions
-```
+## How it works
 
-To use an existing Chrome executable instead, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its full path. The tests start and stop their own local server, use generated documents, and delete their temporary files afterward.
+Your browser reads the selected files into temporary memory, processes the conversion or edit locally, and creates the download. Word, Excel, and PowerPoint conversion uses local document rendering rather than sending your files to an external service.
 
-The regression tests cover invalid page selections, page order, existing crop origins, PDF text columns, long text wrapping, alternate XML prefixes, PowerPoint paragraph runs, and saved presentation order.
+## What to expect from conversions
 
-## Build and deployment
+- **PDF → Word and PowerPoint:** pages become images to preserve their appearance; the text in those Office outputs is not editable. These files can be converted back to PDF.
+- **Office → PDF:** supported pictures, tables, and styling are rendered into the output. Complex effects or unavailable fonts may look different. Spreadsheet formulas use their saved results.
+- **PDF → Excel:** table extraction is approximate. Original formulas, charts, and formatting cannot be recovered from a PDF. Scanned or image-only PDFs require OCR, which is not included.
 
-- **Vercel:** `vercel.json` uses `next build --webpack`. Run `npm run build:next` to check this build locally.
-- **Netlify:** `netlify.toml` uses `npm run build:static` and publishes `out/`.
-- **GitHub Pages:** the included workflow runs tests and exports `out/`, using the base path supplied by the Pages action. Enable GitHub Actions as the Pages publishing source in repository settings.
-- **Vinext/Cloudflare:** `npm run build` produces the existing server/client build in `dist/`; it requires a server runtime. `npm start` starts the configured local Wrangler runtime.
+## Third-party acknowledgements
 
-For another host serving a subdirectory, set `NEXT_PUBLIC_BASE_PATH` at build time (for example, `/GT-PDF`) before running `npm run build:static`. This also prefixes the PDF worker and resource URLs.
-
-## Licensing
-
-The PDF engine is `pdf-lib`, licensed under MIT. Its notice is published at `/third-party-notices.txt` and retained in the repository.
+See the [third-party notices](public/third-party-notices.txt) for the libraries that help power GHOST PDF.
