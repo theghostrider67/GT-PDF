@@ -10,7 +10,7 @@ import JSZip from "jszip";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 const require = createRequire(import.meta.url);
-const { createCanvas } = require("@napi-rs/canvas");
+const { createCanvas, GlobalFonts } = require("@napi-rs/canvas");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const directory = await mkdtemp(path.join(tmpdir(), "ghost-toolkit-"));
 const outputDirectory = process.env.GHOST_PDF_TEST_OUTPUT_DIR;
@@ -62,7 +62,8 @@ try {
   const modified = await PDFDocument.load(await source.save()); modified.getPage(0).drawText("CHANGED", { x: 40, y: 60, size: 18 });
   const damagedPath = path.join(directory, "damaged.pdf"); await writeFile(damagedPath, Buffer.from((await readFile(sourcePath)).toString("latin1").replace(/startxref\s+\d+/, "startxref\n0"), "latin1"));
   const modifiedPath = path.join(directory, "modified.pdf"); await writeFile(modifiedPath, await modified.save());
-  const canvas = createCanvas(1200, 1600); const ctx = canvas.getContext("2d"); ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1200, 1600); ctx.fillStyle = "black"; ctx.font = "bold 64px Arial"; ctx.fillText("GHOST PDF OCR TEST", 80, 180); ctx.font = "48px Arial"; ctx.fillText("Invoice number 12345", 80, 280);
+  assert(GlobalFonts.registerFromPath(path.join(root, "node_modules/pdfjs-dist/standard_fonts/LiberationSans-Regular.ttf"), "GhostFixture"), "Load the bundled OCR fixture font");
+  const canvas = createCanvas(1200, 1600); const ctx = canvas.getContext("2d"); ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1200, 1600); ctx.fillStyle = "black"; ctx.font = "64px GhostFixture"; ctx.fillText("GHOST PDF OCR TEST", 80, 180); ctx.font = "48px GhostFixture"; ctx.fillText("Invoice number 12345", 80, 280);
   const png = canvas.toBuffer("image/png"); const pngPath = path.join(directory, "scan.png"); await writeFile(pngPath, png);
   const scanned = await PDFDocument.create(); const image = await scanned.embedPng(png); scanned.addPage([600, 800]).drawImage(image, { x: 0, y: 0, width: 600, height: 800 }); const scannedPath = path.join(directory, "scan.pdf"); await writeFile(scannedPath, await scanned.save());
   const formDoc = await PDFDocument.create(); const formPage = formDoc.addPage([500, 600]); formPage.drawText("Name:", { x: 35, y: 540 }); const form = formDoc.getForm(); const fullName = form.createTextField("Full Name"); fullName.addToPage(formPage, { x: 35, y: 470, width: 250, height: 30 }); const agree = form.createCheckBox("Accept"); agree.addToPage(formPage, { x: 35, y: 420, width: 20, height: 20 }); const formPath = path.join(directory, "form.pdf"); await writeFile(formPath, await formDoc.save());
@@ -108,7 +109,7 @@ try {
   await choose("Redact PDF"); await box(.04, .16, .95, .29); assert.equal(await page.locator(".studio-mark").count(), 1); const redacted = await run("redacted.pdf"); assert(!(await getText(redacted)).join(" ").includes("SECRET"));
   await choose("PDF Forms", [formPath]); await page.getByLabel("Full Name", { exact: true }).fill("GHOST TEST"); await page.getByLabel("Accept", { exact: true }).check(); await box(.1, .65, .55, .72); await page.getByLabel("Field name", { exact: true }).fill("New Field"); const filled = await PDFDocument.load(await run("forms.pdf")); assert.equal(filled.getForm().getTextField("Full Name").getText(), "GHOST TEST"); assert(filled.getForm().getCheckBox("Accept").isChecked()); assert(filled.getForm().getField("New Field"));
   await choose("Crop PDF"); await box(.1, .1, .8, .8); const cropped = await PDFDocument.load(await run("visual-crop.pdf")); assert(Math.abs(cropped.getPage(0).getCropBox().width - 210) < 2);
-  await choose("OCR PDF", [scannedPath]); const recognized = await run("ocr.pdf", 120000); assert((await getText(recognized)).join(" ").includes("GHOST"));
+  await choose("OCR PDF", [scannedPath]); const recognized = await run("ocr.pdf", 120000); const recognizedText = (await getText(recognized)).join(" "); assert(recognizedText.toUpperCase().includes("GHOST"), `Expected searchable OCR text; received: ${JSON.stringify(recognizedText)}`);
   await choose("Images to PDF", [pngPath]); await page.getByLabel("Page orientation").selectOption("landscape"); const landscape = await PDFDocument.load(await run("landscape.pdf")); assert(landscape.getPage(0).getWidth() > landscape.getPage(0).getHeight());
   await choose("Watermark PDF"); await page.locator('.watermark-image-option input[type="file"]').setInputFiles(pngPath); const watermarkPdf = await run("image-watermark.pdf"); assert.equal((await PDFDocument.load(watermarkPdf)).getPageCount(), 3);
   await choose("Sign PDF"); await page.getByRole("button", { name: "Upload", exact: true }).click(); await page.locator('.image-upload input[type="file"]').setInputFiles(pngPath); const signed = await run("image-signed.pdf"); assert.equal((await PDFDocument.load(signed)).getPageCount(), 3);
