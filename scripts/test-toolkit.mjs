@@ -115,7 +115,13 @@ try {
   await choose("Organize PDF"); await page.locator(".page-thumbnail").first().waitFor(); await page.getByLabel("New page order").fill("3,1"); const reordered = await run("organized.pdf"); const reorderedText = await getText(reordered); assert.equal(reorderedText.length, 2); assert(reorderedText[0].includes("PAGE 3"));
   await choose("Rotate PDF"); await page.locator(".workflow-panel summary").click(); await page.getByLabel("Apply a finishing workflow", { exact: true }).check(); await page.getByLabel("Then rotate every page").selectOption("90"); await page.getByLabel("Then add a watermark", { exact: true }).fill("GHOST WORKFLOW"); await page.getByRole("button", { name: "Save workflow", exact: true }).click(); assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("ghost-pdf-workflow")).watermark), "GHOST WORKFLOW"); const finished = await run("workflow.pdf"); assert((await getText(finished))[0].includes("GHOST WORKFLOW"));
   console.log("PASS image orientation, image watermark, uploaded signature, page organization, and saved finishing workflow");
-  await choose("Translate PDF"); if (await page.locator(".process-button").isDisabled()) assert((await page.locator(".advanced-options").textContent()).includes("unavailable")); else console.log("INFO native translation available; browser-managed language download requires a real language pack for end-to-end verification");
+  await choose("Translate PDF");
+  const translationNotice = page.locator(".advanced-options .inline-note").filter({ hasText: /Private translation is unavailable|Your browser translates on-device/ });
+  await translationNotice.waitFor({ state: "visible" });
+  const translationUnavailable = (await translationNotice.textContent()).includes("unavailable");
+  await page.waitForFunction((unavailable) => document.querySelector(".process-button").disabled === unavailable, translationUnavailable);
+  assert.equal(await page.locator(".process-button").isDisabled(), translationUnavailable);
+  if (!translationUnavailable) console.log("INFO native translation available; browser-managed language download requires a real language pack for end-to-end verification");
   await page.setViewportSize({ width: 390, height: 844 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false); await page.getByRole("button", { name: "Toggle navigation" }).click(); assert.equal(await page.getByRole("button", { name: "Toggle navigation" }).getAttribute("aria-expanded"), "true");
   assert.deepEqual(errors, []); console.log("PASS visual editor, irreversible redaction, forms, visual crop, OCR, translation capability messaging, and mobile navigation");
 } catch (error) {
